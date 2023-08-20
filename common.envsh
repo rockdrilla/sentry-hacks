@@ -1,3 +1,19 @@
 #!/bin/sh
 PYTHON_VERSION=3.11
 SENTRY_RELEASE=22.6.0
+
+: "${SENTRY_REPO_URI:=https://github.com/getsentry/sentry}"
+: "${SENTRY_GITREF:=${SENTRY_RELEASE}}"
+: "${SENTRY_URI:=${SENTRY_REPO_URI}/archive/${SENTRY_GITREF}.tar.gz}"
+
+: "${SNUBA_REPO_URI:=https://github.com/getsentry/snuba}"
+: "${SNUBA_GITREF:=${SENTRY_RELEASE}}"
+: "${SNUBA_URI:=${SNUBA_REPO_URI}/archive/${SNUBA_GITREF}.tar.gz}"
+
+: "${UWSGI_REPO_URI:=https://github.com/unbit/uwsgi}"
+: "${UWSGI_GITREF:=2.0.20}"
+: "${UWSGI_URI:=${UWSGI_REPO_URI}/archive/${UWSGI_GITREF}.tar.gz}"
+
+: "${UWSGI_DOGSTATSD_REPO_URI:=https://github.com/DataDog/uwsgi-dogstatsd}"
+: "${UWSGI_DOGSTATSD_GITREF:=1455da24aa52f05b1dc5eac73182fffdd89e84d9}"
+: "${UWSGI_DOGSTATSD_URI:=${UWSGI_DOGSTATSD_REPO_URI}/archive/${UWSGI_DOGSTATSD_GITREF}.tar.gz}"
