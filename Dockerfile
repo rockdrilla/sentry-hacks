@@ -259,7 +259,7 @@ RUN quiet apt-install binutils ; \
 
 ## ---
 
-FROM ${IMAGE_PATH}/${STAGE_IMAGE} as sentry-aldente
+FROM ${BUILDER_INTERIM_IMAGE} as sentry-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
 ENV SENTRY_LIGHT_BUILD=1
@@ -290,14 +290,12 @@ RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
 RUN tar -xf /app/sentry.tar.gz ; \
     rm /app/sentry.tar.gz ; \
     apt-wrap-python -d "${SENTRY_BUILD_DEPS}" \
-      pip install -e . ; \
+      pip -v install -e . ; \
     cleanup ; \
     python -m compileall -q . ; \
     ## adjust permissions
     chmod -R go-w /app ; \
     # smoke/qa
-    set -xv ; \
-    sentry --version ; \
     python -c 'import maxminddb.extension; maxminddb.extension.Reader'
 
 RUN apt-list-installed > apt.deps.1 ; \
@@ -306,9 +304,21 @@ RUN apt-list-installed > apt.deps.1 ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
 
+## finish layer
+RUN quiet apt-install binutils ; \
+    ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+    xvp ls -lrS /tmp/elves ; \
+    xvp strip --strip-debug /tmp/elves ; echo ; \
+    xvp ls -lrS /tmp/elves ; \
+    cleanup
+
+# smoke/qa
+RUN set -xv ; \
+    sentry --version
+
 ## ---
 
-FROM ${IMAGE_PATH}/${STAGE_IMAGE} as snuba-aldente
+FROM ${BUILDER_INTERIM_IMAGE} as snuba-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
 ARG UWSGI_INTERIM_IMAGE
@@ -336,20 +346,29 @@ RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
 RUN tar -xf /app/snuba.tar.gz ; \
     rm /app/snuba.tar.gz ; \
     apt-wrap-python \
-      pip install -e . ; \
+      pip -v install -e . ; \
     cleanup ; \
     python -m compileall -q . ; \
     ## adjust permissions
-    chmod -R go-w /app ; \
-    # smoke/qa
-    set -xv ; \
-    snuba --version
+    chmod -R go-w /app
 
 RUN apt-list-installed > apt.deps.1 ; \
     cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka | sort -uV > apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
+
+## finish layer
+RUN quiet apt-install binutils ; \
+    ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+    xvp ls -lrS /tmp/elves ; \
+    xvp strip --strip-debug /tmp/elves ; echo ; \
+    xvp ls -lrS /tmp/elves ; \
+    cleanup
+
+# smoke/qa
+RUN set -xv ; \
+    snuba --version
 
 ## ---
 
