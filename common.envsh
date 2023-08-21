@@ -17,3 +17,11 @@ SENTRY_RELEASE=22.6.0
 : "${UWSGI_DOGSTATSD_REPO_URI:=https://github.com/DataDog/uwsgi-dogstatsd}"
 : "${UWSGI_DOGSTATSD_GITREF:=e11ace2c535a01c6b5f087effd2afd96254e7431}"
 : "${UWSGI_DOGSTATSD_URI:=${UWSGI_DOGSTATSD_REPO_URI}/archive/${UWSGI_DOGSTATSD_GITREF}.tar.gz}"
+
+: "${LIBRDKAFKA_REPO_URI:=https://github.com/confluentinc/librdkafka}"
+: "${LIBRDKAFKA_GITREF:=v2.2.0}"
+: "${LIBRDKAFKA_URI:=${LIBRDKAFKA_REPO_URI}/archive/${LIBRDKAFKA_GITREF}.tar.gz}"
+
+: "${SENTRY_ARROYO_REPO_URI:=https://github.com/getsentry/arroyo}"
+: "${SENTRY_ARROYO_GITREF:=0.1.1}"
+: "${SENTRY_ARROYO_URI:=${SENTRY_ARROYO_REPO_URI}/archive/${SENTRY_ARROYO_GITREF}.tar.gz}"

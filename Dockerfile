@@ -5,6 +5,7 @@ ARG PYTHON_VERSION
 
 ARG BUILDER_INTERIM_IMAGE
 ARG UWSGI_INTERIM_IMAGE
+ARG LIBRDKAFKA_INTERIM_IMAGE
 ARG HELPER_IMAGE=${DISTRO}-buildd:${SUITE}
 ARG STAGE_IMAGE=python-dev:${PYTHON_VERSION}-${SUITE}
 ARG BASE_IMAGE=python-min:${PYTHON_VERSION}-${SUITE}
@@ -84,6 +85,29 @@ RUN mkdir /tmp/uwsgi ; \
     ## save tarball
     tar -cf - . | gzip -9 > /app/uwsgi.tar.gz ; \
     ls -l /run/artifacts/uwsgi-${UWSGI_GITREF}.tar.gz /app/uwsgi.tar.gz ; \
+    cd / ; \
+    cleanup
+
+## ---
+
+FROM ${IMAGE_PATH}/${HELPER_IMAGE} as sentry-arroyo-prepare
+SHELL [ "/bin/sh", "-ec" ]
+
+ARG SENTRY_ARROYO_GITREF
+
+WORKDIR /app
+
+## repack sentry-arroyo tarball
+RUN mkdir /tmp/sentry-arroyo ; \
+    cd /tmp/sentry-arroyo ; \
+    tar --strip-components=1 -xf /run/artifacts/sentry-arroyo-${SENTRY_ARROYO_GITREF}.tar.gz ; \
+    ## remove unused things
+    rm -rf docs tests ; \
+    ## monkey patch requirements.txt
+    sed -Ei 's/^(confluent-kafka)([=><].*|)$/\1==2.2.0/' requirements.txt ; \
+    ## save tarball
+    tar -cf - . | gzip -9 > /app/sentry-arroyo.tar.gz ; \
+    ls -l /run/artifacts/sentry-arroyo-${SENTRY_ARROYO_GITREF}.tar.gz /app/sentry-arroyo.tar.gz ; \
     cd / ; \
     cleanup
 
@@ -179,6 +203,62 @@ RUN quiet apt-install binutils ; \
 
 ## ---
 
+FROM ${BUILDER_INTERIM_IMAGE} as librdkafka
+SHELL [ "/bin/sh", "-ec" ]
+
+ENV BUILD_DEPS='libcurl4-openssl-dev libffi-dev liblz4-dev libsasl2-dev libssl-dev libzstd-dev zlib1g-dev'
+
+ARG LIBRDKAFKA_GITREF
+
+WORKDIR /app
+
+RUN apt-list-installed > apt.deps.0
+
+## build local librdkafka (*crazy*)
+RUN mkdir /tmp/librdkafka ; \
+    cd /tmp/librdkafka ; \
+    apt-wrap 'gcc dpkg-dev' \
+      sh -ec 'dpkg-buildflags --export=sh > /tmp/librdkafka.buildenv' ; \
+    . /tmp/librdkafka.buildenv ; \
+    export CPPFLAGS="${CPPFLAGS} -Wno-free-nonheap-object" ; \
+    export LDFLAGS="${LDFLAGS} -Wno-free-nonheap-object" ; \
+    tar --strip-components=1 -xf /run/artifacts/librdkafka-${LIBRDKAFKA_GITREF}.tar.gz ; \
+    apt-wrap-sodeps -p /usr/local "build-essential ${BUILD_DEPS}" \
+      sh -ec '\
+        ./configure \
+          --prefix=/usr/local \
+          --sysconfdir=/etc \
+          --localstatedir=/var \
+          --runstatedir=/run \
+        ; \
+        make -j$(nproc) libs ; \
+        make install-subdirs ; \
+        ldconfig' ; \
+    ## remove unused things
+    rm -rf /usr/local/share/doc /usr/local/lib/librdkafka*.a
+
+COPY --from=sentry-arroyo-prepare  /app/sentry-arroyo.tar.gz  /app/
+
+## install sentry-arroyo
+RUN apt-wrap-python -d "${BUILD_DEPS}" \
+      pip -v install --no-binary 'confluent-kafka' /app/sentry-arroyo.tar.gz ; \
+    rm /app/sentry-arroyo.tar.gz
+
+RUN apt-list-installed > apt.deps.1 ; \
+    set +e ; \
+    grep -Fvx -f apt.deps.0 apt.deps.1 > apt.deps.librdkafka ; \
+    rm -f apt.deps.0 apt.deps.1
+
+## finish layer
+RUN quiet apt-install binutils ; \
+    ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+    xvp ls -lrS /tmp/elves ; \
+    xvp strip --strip-debug /tmp/elves ; echo ; \
+    xvp ls -lrS /tmp/elves ; \
+    cleanup
+
+## ---
+
 FROM ${IMAGE_PATH}/${STAGE_IMAGE} as sentry-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
@@ -186,17 +266,24 @@ ENV SENTRY_LIGHT_BUILD=1
 ENV SENTRY_BUILD_DEPS='libffi-dev libjpeg-dev libmaxminddb-dev libpq-dev libxmlsec1-dev libxmlsec1-dev libxslt-dev libyaml-dev'
 
 ARG UWSGI_INTERIM_IMAGE
+ARG LIBRDKAFKA_INTERIM_IMAGE
 
 ## copy uwsgi and dependencies
 COPY --from=${UWSGI_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${UWSGI_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${UWSGI_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
+## copy sentry-arroyo and librdkafka
+COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
+COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
+COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
+
 COPY --from=sentry-prepare  /app/sentry.tar.gz  /app/
 
 WORKDIR /app
 
-RUN xargs -r -a /app/apt.deps.uwsgi apt-install ; \
+RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
+    | sort -uV | xargs -r apt-install ; \
     apt-list-installed > apt.deps.0
 
 ## install sentry "in-place"
@@ -214,7 +301,7 @@ RUN tar -xf /app/sentry.tar.gz ; \
     python -c 'import maxminddb.extension; maxminddb.extension.Reader'
 
 RUN apt-list-installed > apt.deps.1 ; \
-    cp /app/apt.deps.uwsgi ./apt.deps ; \
+    cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka | sort -uV > apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
@@ -225,17 +312,24 @@ FROM ${IMAGE_PATH}/${STAGE_IMAGE} as snuba-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
 ARG UWSGI_INTERIM_IMAGE
+ARG LIBRDKAFKA_INTERIM_IMAGE
 
 ## copy uwsgi and dependencies
 COPY --from=${UWSGI_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${UWSGI_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${UWSGI_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
+## copy sentry-arroyo and librdkafka
+COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
+COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
+COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
+
 COPY --from=snuba-prepare  /app/snuba.tar.gz  /app/
 
 WORKDIR /app
 
-RUN xargs -r -a /app/apt.deps.uwsgi apt-install ; \
+RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
+    | sort -uV | xargs -r apt-install ; \
     apt-list-installed > apt.deps.0
 
 ## install snuba "in-place"
@@ -252,7 +346,7 @@ RUN tar -xf /app/snuba.tar.gz ; \
     snuba --version
 
 RUN apt-list-installed > apt.deps.1 ; \
-    cp /app/apt.deps.uwsgi ./apt.deps ; \
+    cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka | sort -uV > apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
