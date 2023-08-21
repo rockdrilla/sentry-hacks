@@ -1,0 +1,94 @@
+--- a/snuba/admin/views.py
++++ b/snuba/admin/views.py
+@@ -79,6 +79,9 @@ def clickhouse_queries() -> Response:
+ def clickhouse_system_query() -> Response:
+     req = request.get_json()
+     try:
++        if req is None:
++            req = {}
++
+         host = req["host"]
+         port = req["port"]
+         storage = req["storage"]
+--- a/snuba/schemas.py
++++ b/snuba/schemas.py
+@@ -51,7 +51,6 @@ def validate_jsonschema(
+ 
+     validator_cls(
+         schema,
+-        types={"array": (list, tuple)},
+         format_checker=jsonschema.FormatChecker(),
+     ).validate(value, schema)
+ 
+--- a/snuba/settings/__init__.py
++++ b/snuba/settings/__init__.py
+@@ -223,6 +223,7 @@ def _load_settings(obj: MutableMapping[str, Any] = locals()) -> None:
+     provide a full absolute path such as `/foo/bar/my_settings.py`."""
+ 
+     import importlib
++    import importlib.abc
+     import importlib.util
+     import os
+ 
+--- a/snuba/utils/metrics/timer.py
++++ b/snuba/utils/metrics/timer.py
+@@ -1,23 +1,15 @@
+ from itertools import groupby
+-from typing import TYPE_CHECKING, Mapping, MutableSequence, Optional, Tuple
++from typing import Mapping, MutableSequence, Optional, Tuple, TypedDict
+ 
+ from snuba.utils.clock import Clock, SystemClock
+ from snuba.utils.metrics.backends.abstract import MetricsBackend
+ from snuba.utils.metrics.types import Tags
+ 
+-if TYPE_CHECKING:
+-    from mypy_extensions import TypedDict
+-
+-    class TimerData(TypedDict):
+-        timestamp: int
+-        duration_ms: int
+-        marks_ms: Mapping[str, int]
+-        tags: Tags
+-
+-else:
+-    from typing import Any
+-
+-    TimerData = Mapping[Any, Any]
++class TimerData(TypedDict):
++    timestamp: int
++    duration_ms: int
++    marks_ms: Mapping[str, int]
++    tags: Tags
+ 
+ 
+ class Timer:
+--- a/snuba/web/__init__.py
++++ b/snuba/web/__init__.py
+@@ -1,8 +1,6 @@
+ from __future__ import annotations
+ 
+-from typing import Any, Mapping, NamedTuple
+-
+-from mypy_extensions import TypedDict
++from typing import Any, Mapping, NamedTuple, TypedDict
+ 
+ from snuba.reader import Column, Result, Row, transform_rows
+ from snuba.utils.serializable_exception import SerializableException
+--- a/snuba/web/views.py
++++ b/snuba/web/views.py
+@@ -405,14 +405,13 @@ def _trace_transaction(dataset: Dataset) -> None:
+ 
+ @application.route("/query", methods=["GET", "POST"])
+ @util.time_request("query")
+-def unqualified_query_view(*, timer: Timer) -> WerkzeugResponse:
++def unqualified_query_view(*, timer: Timer) -> Union[Response, str, WerkzeugResponse]:
+     if http_request.method == "GET":
+         return redirect(f"/{settings.DEFAULT_DATASET_NAME}/query", code=302)
+     elif http_request.method == "POST":
+         body = parse_request_body(http_request)
+         dataset = get_dataset(body.pop("dataset", settings.DEFAULT_DATASET_NAME))
+         _trace_transaction(dataset)
+-        # Not sure what language to pass into dataset_query here
+         return dataset_query(dataset, body, timer)
+     else:
+         assert False, "unexpected fallthrough"

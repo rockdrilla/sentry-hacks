@@ -321,6 +321,9 @@ RUN set -xv ; \
 FROM ${BUILDER_INTERIM_IMAGE} as snuba-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
+ENV BUILD_DEPS='libcurl4-openssl-dev libffi-dev liblz4-dev libpcre3-dev libsasl2-dev libssl-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
+ENV BUILD_FROM_SRC='cffi,charset-normalizer,clickhouse-driver,lz4,markupsafe,python-rapidjson,pyyaml,regex,simplejson'
+
 ARG UWSGI_INTERIM_IMAGE
 ARG LIBRDKAFKA_INTERIM_IMAGE
 
@@ -345,8 +348,8 @@ RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
 ## install snuba "in-place"
 RUN tar -xf /app/snuba.tar.gz ; \
     rm /app/snuba.tar.gz ; \
-    apt-wrap-python \
-      pip -v install -e . ; \
+    apt-wrap-python -d "${BUILD_DEPS}" \
+      pip -v install --no-binary "${BUILD_FROM_SRC}" -e . ; \
     cleanup ; \
     python -m compileall -q . ; \
     ## adjust permissions
