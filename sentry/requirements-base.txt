@@ -74,5 +74,5 @@ typing-extensions==3.10.0.2
 ua-parser==0.10.0
 unidiff==0.7.1
 urllib3[brotli]==1.25.11
-uwsgi==2.0.19.1
+uwsgi==2.0.22
 zstandard==0.14.1

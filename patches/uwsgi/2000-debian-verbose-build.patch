@@ -1,0 +1,19 @@
+Description: Ensure verbose build in the uwsgi build systems
+ This gets compiler command line logs in the build log
+ which is nice for debugging.
+Author: Alexandre Rossi <alexandre.rossi@gmail.com>
+Forwarded: not-needed
+Last-Update: 2020-06-05
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/uwsgiconfig.py
++++ b/uwsgiconfig.py
+@@ -98,7 +98,7 @@
+     'ucontext': False,
+ }
+ 
+-verbose_build = False
++verbose_build = True
+ 
+ def print_compilation_output(default_str, verbose_str):
+     if verbose_build:

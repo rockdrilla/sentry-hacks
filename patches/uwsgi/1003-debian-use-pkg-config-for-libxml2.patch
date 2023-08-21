@@ -1,0 +1,64 @@
+Description: use pkg-config for libxml2
+ xml2-config is deprecated
+Author: Jonas Smedegaard <dr@jones.dk>
+Bug-Debian: http://bugs.debian.org/949509
+Last-Update: 2020-01-23
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/plugins/airbrake/uwsgiplugin.py
++++ b/plugins/airbrake/uwsgiplugin.py
+@@ -2,8 +2,8 @@
+ 
+ NAME='airbrake'
+ 
+-CFLAGS = [spcall('xml2-config --cflags')]
++CFLAGS = [spcall('pkg-config --cflags libxml-2.0')]
+ LDFLAGS = []
+-LIBS = ['-lcurl', spcall('xml2-config --libs')]
++LIBS = ['-lcurl', spcall('pkg-config --libs libxml-2.0')]
+ GCC_LIST = ['airbrake_plugin']
+ 
+--- a/plugins/webdav/uwsgiplugin.py
++++ b/plugins/webdav/uwsgiplugin.py
+@@ -3,8 +3,8 @@
+ NAME = 'webdav'
+ 
+ CFLAGS = ['-Wno-deprecated-declarations']
+-CFLAGS += os.popen('xml2-config --cflags').read().rstrip().split()
++CFLAGS += os.popen('pkg-config --cflags libxml-2.0').read().rstrip().split()
+ LDFLAGS = []
+-LIBS = os.popen('xml2-config --libs').read().rstrip().split()
++LIBS = os.popen('pkg-config --libs libxml-2.0').read().rstrip().split()
+ 
+ GCC_LIST = ['webdav']
+--- a/uwsgiconfig.py
++++ b/uwsgiconfig.py
+@@ -1311,10 +1311,10 @@
+ 
+         if self.get('xml'):
+             if self.get('xml') == 'auto':
+-                xmlconf = spcall('xml2-config --libs')
++                xmlconf = spcall('pkg-config --libs libxml-2.0')
+                 if xmlconf and uwsgi_os != 'Darwin':
+                     self.libs.append(xmlconf)
+-                    xmlconf = spcall("xml2-config --cflags")
++                    xmlconf = spcall("pkg-config --cflags libxml-2.0")
+                     self.cflags.append(xmlconf)
+                     self.cflags.append("-DUWSGI_XML -DUWSGI_XML_LIBXML2")
+                     self.gcc_list.append('core/xmlconf')
+@@ -1325,13 +1325,13 @@
+                     self.gcc_list.append('core/xmlconf')
+                     report['xml'] = 'expat'
+             elif self.get('xml') == 'libxml2':
+-                xmlconf = spcall('xml2-config --libs')
++                xmlconf = spcall('pkg-config --libs libxml-2.0')
+                 if xmlconf is None:
+                     print("*** libxml2 headers unavailable. uWSGI build is interrupted. You have to install libxml2 development package or use libexpat or disable XML")
+                     sys.exit(1)
+                 else:
+                     self.libs.append(xmlconf)
+-                    xmlconf = spcall("xml2-config --cflags")
++                    xmlconf = spcall("pkg-config --cflags libxml-2.0")
+                     if xmlconf is None:
+                         print("*** libxml2 headers unavailable. uWSGI build is interrupted. You have to install libxml2 development package or use libexpat or disable XML")
+                         sys.exit(1)

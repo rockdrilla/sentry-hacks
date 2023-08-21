@@ -1,0 +1,22 @@
+--- a/core/regexp.c
++++ b/core/regexp.c
+@@ -4,12 +4,15 @@
+ extern struct uwsgi_server uwsgi;
+ 
+ void uwsgi_opt_pcre_jit(char *opt, char *value, void *foobar) {
+-#if defined(PCRE_STUDY_JIT_COMPILE) && defined(PCRE_CONFIG_JIT)
++#if defined(PCRE2_CONFIG_JIT)
+ 	int has_jit = 0, ret;
+-	ret = pcre_config(PCRE_CONFIG_JIT, &has_jit);
+-	if (ret != 0 || has_jit != 1)
++	ret = pcre2_config(PCRE2_CONFIG_JIT, NULL);
++	if (ret != sizeof(has_jit))
+ 		return;
+-	uwsgi.pcre_jit = PCRE_STUDY_JIT_COMPILE;
++	ret = pcre2_config(PCRE2_CONFIG_JIT, &has_jit);
++	if (ret != 0)
++		return;
++	uwsgi.pcre_jit = has_jit;
+ #endif
+ }
+ 

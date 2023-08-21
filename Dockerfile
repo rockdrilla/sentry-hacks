@@ -77,6 +77,7 @@ RUN mkdir /tmp/uwsgi ; \
     find /app/uwsgi/ -name '*.patch' -type f | sort -V | \
     while read -r pfile ; do \
         [ -n "${pfile}" ] || continue ; \
+        echo "# applying ${pfile}" ; \
         patch -p1 < "${pfile}" ; \
     done ; \
     ## save tarball
@@ -90,8 +91,9 @@ RUN mkdir /tmp/uwsgi ; \
 FROM ${IMAGE_PATH}/${STAGE_IMAGE} as uwsgi
 SHELL [ "/bin/sh", "-ec" ]
 
-ENV UWSGI_PROFILE_OVERRIDE='malloc_implementation=jemalloc;pcre=true;ssl=false;xml=false;routing=false'
-ENV UWSGI_BUILD_DEPS='libjemalloc-dev libpcre3-dev'
+ENV UWSGI_PROFILE_OVERRIDE='malloc_implementation=jemalloc;pcre=true;ssl=false;xml=false'
+ENV UWSGI_BUILD_DEPS='libjemalloc-dev libpcre2-dev'
+ENV APPEND_CFLAGS='-g -O3 -flto=1 -fuse-linker-plugin -ffat-lto-objects -flto-partition=none'
 
 COPY --from=uwsgi-prepare  /app/uwsgi.tar.gz  /app/
 
@@ -102,7 +104,7 @@ RUN apt-list-installed > apt.deps.0
 ## build uwsgi
 RUN apt-wrap-python -d "${UWSGI_BUILD_DEPS}" \
       -p "/usr/local:${SITE_PACKAGES}" \
-        pip install /app/uwsgi.tar.gz ; \
+        pip -v install /app/uwsgi.tar.gz ; \
     rm /app/uwsgi.tar.gz ; \
     LD_PRELOAD= ldd /usr/local/bin/uwsgi
 
@@ -121,11 +123,16 @@ RUN mkdir /tmp/uwsgi-dogstatsd /tmp/uwsgi-dogstatsd.build ; \
       uwsgi --build-plugin /tmp/uwsgi-dogstatsd \
     ; \
     cp -t ${PWD} /tmp/uwsgi-dogstatsd.build/*.so ; \
-    ls -l ./*.so ; \
+    LD_PRELOAD= ldd ./*.so ; \
     uwsgi --need-plugin=./dogstatsd --help > /dev/null
 
 ## finish layer
-RUN cleanup
+RUN quiet apt-install binutils ; \
+    ufind -z /app /usr/local "${SITE_PACKAGES}" | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+    xvp ls -lrS /tmp/elves ; \
+    xvp strip --strip-debug /tmp/elves ; echo ; \
+    xvp ls -lrS /tmp/elves ; \
+    cleanup
 
 ## ---
 
