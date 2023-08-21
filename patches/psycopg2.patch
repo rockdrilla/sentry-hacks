@@ -9,6 +9,16 @@
  
  # Register default adapters.
  
+@@ -120,9 +118,6 @@ def connect(dsn=None, connection_factory=None, cursor_factory=None, **kwargs):
+     if 'async_' in kwargs:
+         kwasync['async_'] = kwargs.pop('async_')
+ 
+-    if dsn is None and not kwargs:
+-        raise TypeError('missing dsn and no parameters')
+-
+     dsn = _ext.make_dsn(dsn, **kwargs)
+     conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+     if cursor_factory is not None:
 --- a/lib/_ipaddress.py
 +++ b/lib/_ipaddress.py
 @@ -26,7 +26,6 @@
@@ -54,7 +64,7 @@
      """
      An `~psycopg2.extensions.ISQLQuote` wrapper to adapt a Python object to
      :sql:`json` data type.
-@@ -82,13 +81,9 @@ class Json(object):
+@@ -82,13 +81,8 @@ class Json(object):
              qs.prepare(self._conn)
          return qs.getquoted()
  
@@ -66,12 +76,11 @@
 -            # getquoted is binary in Py3
 -            return self.getquoted().decode('ascii', 'replace')
 +    def __str__(self):
-+        # getquoted is binary
 +        return self.getquoted().decode('ascii', 'replace')
  
  
  def register_json(conn_or_curs=None, globally=False, loads=None,
-@@ -168,7 +163,7 @@ def _create_json_typecasters(oid, array_oid, loads=None, name='JSON'):
+@@ -168,7 +162,7 @@ def _create_json_typecasters(oid, array_oid, loads=None, name='JSON'):
  
      JSON = new_type((oid, ), name, typecast_json)
      if array_oid is not None:
@@ -80,7 +89,7 @@
      else:
          JSONARRAY = None
  
-@@ -199,6 +194,6 @@ def _get_json_oids(conn_or_curs, name='json'):
+@@ -199,6 +193,6 @@ def _get_json_oids(conn_or_curs, name='json'):
          conn.rollback()
  
      if not r:
@@ -170,7 +179,7 @@
                  self.range = type(pyrange, (Range,), {})
              if issubclass(pyrange, Range) and pyrange is not Range:
                  self.range = pyrange
-@@ -368,33 +363,54 @@ class RangeCaster(object):
+@@ -368,33 +363,47 @@ class RangeCaster(object):
              schema = 'public'
  
          # get the type oid and attributes
@@ -194,14 +203,8 @@
 -        else:
 -            rec = curs.fetchone()
 +        if not rec:
-+            # The above algorithm doesn't work for customized seach_path
-+            # (#1487) The implementation below works better, but, to guarantee
-+            # backwards compatibility, use it only if the original one failed.
 +            try:
 +                savepoint = False
-+                # Because we executed statements earlier, we are either INTRANS
-+                # or we are IDLE only if the transaction is autocommit, in
-+                # which case we don't need the savepoint anyway.
 +                if conn.status == STATUS_IN_TRANSACTION:
 +                    curs.execute("SAVEPOINT register_type")
 +                    savepoint = True
@@ -227,7 +230,6 @@
 -            if (conn_status != STATUS_IN_TRANSACTION
 -            and not conn.autocommit):
 -                conn.rollback()
-+        # revert the status of the connection as before the command
 +        if conn_status != STATUS_IN_TRANSACTION and not conn.autocommit:
 +            conn.rollback()
  
@@ -241,7 +243,7 @@
  
          return RangeCaster(name, pyrange,
              oid=type, subtype_oid=subtype, array_oid=array)
-@@ -424,7 +440,7 @@ where typname = %s and ns.nspname = %s;
+@@ -424,7 +433,7 @@ where typname = %s and ns.nspname = %s;
  
          m = self._re_range.match(s)
          if m is None:
@@ -250,7 +252,7 @@
  
          lower = m.group(3)
          if lower is None:
-@@ -504,8 +520,7 @@ class NumberRangeAdapter(RangeAdapter):
+@@ -504,8 +513,7 @@ class NumberRangeAdapter(RangeAdapter):
          else:
              upper = ''
  
@@ -898,19 +900,13 @@
          self.type = namedtuple(name, attnames)
          self._ctor = self.type._make
  
-@@ -1120,14 +1095,46 @@ ORDER BY attnum;
+@@ -1120,14 +1095,40 @@ ORDER BY attnum;
  
          recs = curs.fetchall()
  
 +        if not recs:
-+            # The above algorithm doesn't work for customized seach_path
-+            # (#1487) The implementation below works better, but, to guarantee
-+            # backwards compatibility, use it only if the original one failed.
 +            try:
 +                savepoint = False
-+                # Because we executed statements earlier, we are either INTRANS
-+                # or we are IDLE only if the transaction is autocommit, in
-+                # which case we don't need the savepoint anyway.
 +                if conn.status == _ext.STATUS_IN_TRANSACTION:
 +                    curs.execute("SAVEPOINT register_type")
 +                    savepoint = True
@@ -948,13 +944,11 @@
  
          type_oid = recs[0][0]
          array_oid = recs[0][1]
-@@ -1326,3 +1333,8 @@ def _split_sql(sql):
+@@ -1326,3 +1327,6 @@ def _split_sql(sql):
          raise ValueError("the query doesn't contain any '%s' placeholder")
  
      return pre, post
 +
-+
-+# ascii except alnum and underscore
 +_re_clean = _re.compile(
 +    '[' + _re.escape(' !"#$%&\'()*+,-./:;<=>?@[\\]^`{|}~') + ']')
 --- a/lib/pool.py
@@ -1098,87 +1092,14 @@
          else:
              return "%s"
  
---- a/lib/tz.py
-+++ b/lib/tz.py
-@@ -54,7 +54,9 @@ class FixedOffsetTimezone(datetime.tzinfo):
- 
-     def __init__(self, offset=None, name=None):
-         if offset is not None:
--            self._offset = datetime.timedelta(minutes=offset)
-+            if not isinstance(offset, datetime.timedelta):
-+                offset = datetime.timedelta(minutes=offset)
-+            self._offset = offset
-         if name is not None:
-             self._name = name
- 
-@@ -65,18 +67,28 @@ class FixedOffsetTimezone(datetime.tzinfo):
-         try:
-             return cls._cache[key]
-         except KeyError:
--            tz = super(FixedOffsetTimezone, cls).__new__(cls, offset, name)
-+            tz = super().__new__(cls, offset, name)
-             cls._cache[key] = tz
-             return tz
- 
-     def __repr__(self):
--        offset_mins = self._offset.seconds // 60 + self._offset.days * 24 * 60
-         return "psycopg2.tz.FixedOffsetTimezone(offset=%r, name=%r)" \
--            % (offset_mins, self._name)
-+            % (self._offset, self._name)
-+
-+    def __eq__(self, other):
-+        if isinstance(other, FixedOffsetTimezone):
-+            return self._offset == other._offset
-+        else:
-+            return NotImplemented
-+
-+    def __ne__(self, other):
-+        if isinstance(other, FixedOffsetTimezone):
-+            return self._offset != other._offset
-+        else:
-+            return NotImplemented
- 
-     def __getinitargs__(self):
--        offset_mins = self._offset.seconds // 60 + self._offset.days * 24 * 60
--        return offset_mins, self._name
-+        return self._offset, self._name
- 
-     def utcoffset(self, dt):
-         return self._offset
-@@ -84,14 +96,16 @@ class FixedOffsetTimezone(datetime.tzinfo):
-     def tzname(self, dt):
-         if self._name is not None:
-             return self._name
--        else:
--            seconds = self._offset.seconds + self._offset.days * 86400
--            hours, seconds = divmod(seconds, 3600)
--            minutes = seconds / 60
--            if minutes:
--                return "%+03d:%d" % (hours, minutes)
--            else:
--                return "%+03d" % hours
-+
-+        minutes, seconds = divmod(self._offset.total_seconds(), 60)
-+        hours, minutes = divmod(minutes, 60)
-+        rv = "%+03d" % hours
-+        if minutes or seconds:
-+            rv += ":%02d" % minutes
-+            if seconds:
-+                rv += ":%02d" % seconds
-+
-+        return rv
- 
-     def dst(self, dt):
-         return ZERO
 --- a/psycopg/adapter_asis.c
 +++ b/psycopg/adapter_asis.c
-@@ -45,14 +45,12 @@ asis_getquoted(asisObject *self, PyObject *args)
+@@ -45,14 +45,11 @@ asis_getquoted(asisObject *self, PyObject *args)
      }
      else {
          rv = PyObject_Str(self->wrapped);
 -#if PY_3
 -        /* unicode to bytes in Py3 */
-+        /* unicode to bytes */
          if (rv) {
              PyObject *tmp = PyUnicode_AsUTF8String(rv);
              Py_DECREF(rv);
@@ -1206,79 +1127,18 @@
      if (!buffer) {
          goto exit;
      }
---- a/psycopg/adapter_datetime.c
-+++ b/psycopg/adapter_datetime.c
-@@ -423,8 +423,8 @@ psyco_TimeFromTicks(PyObject *self, PyObject *args)
- PyObject *
- psyco_TimestampFromTicks(PyObject *self, PyObject *args)
- {
--    PyObject *m = NULL;
--    PyObject *tz = NULL;
-+    pydatetimeObject *wrapper = NULL;
-+    PyObject *dt_aware = NULL;
-     PyObject *res = NULL;
-     struct tm tm;
-     time_t t;
-@@ -433,10 +433,6 @@ psyco_TimestampFromTicks(PyObject *self, PyObject *args)
-     if (!PyArg_ParseTuple(args, "d", &ticks))
-         return NULL;
- 
--    /* get psycopg2.tz.LOCAL from pythonland */
--    if (!(m = PyImport_ImportModule("psycopg2.tz"))) { goto exit; }
--    if (!(tz = PyObject_GetAttrString(m, "LOCAL"))) { goto exit; }
--
-     t = (time_t)floor(ticks);
-     ticks -= (double)t;
-     if (!localtime_r(&t, &tm)) {
-@@ -444,14 +440,29 @@ psyco_TimestampFromTicks(PyObject *self, PyObject *args)
-         goto exit;
-     }
- 
--    res = _psyco_Timestamp(
--        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
--        tm.tm_hour, tm.tm_min, (double)tm.tm_sec + ticks,
--        tz);
-+    /* Convert the tm to a wrapper containing a naive datetime.datetime */
-+    if (!(wrapper = (pydatetimeObject *)_psyco_Timestamp(
-+            tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-+            tm.tm_hour, tm.tm_min, (double)tm.tm_sec + ticks, NULL))) {
-+        goto exit;
-+    }
-+
-+    /* Localize the datetime and assign it back to the wrapper */
-+    if (!(dt_aware = PyObject_CallMethod(
-+            wrapper->wrapped, "astimezone", NULL))) {
-+        goto exit;
-+    }
-+    Py_CLEAR(wrapper->wrapped);
-+    wrapper->wrapped = dt_aware;
-+    dt_aware = NULL;
-+
-+    /* the wrapper is ready to be returned */
-+    res = (PyObject *)wrapper;
-+    wrapper = NULL;
- 
- exit:
--    Py_XDECREF(tz);
--    Py_XDECREF(m);
-+    Py_XDECREF(dt_aware);
-+    Py_XDECREF(wrapper);
-     return res;
- }
- 
 --- a/psycopg/adapter_pdecimal.c
 +++ b/psycopg/adapter_pdecimal.c
-@@ -81,8 +81,7 @@ pdecimal_getquoted(pdecimalObject *self, PyObject *args)
+@@ -81,8 +81,6 @@ pdecimal_getquoted(pdecimalObject *self, PyObject *args)
      /* res may be unicode and may suffer for issue #57 */
  output:
  
 -#if PY_3
 -    /* unicode to bytes in Py3 */
-+    /* unicode to bytes */
      {
          PyObject *tmp = PyUnicode_AsUTF8String(res);
          Py_DECREF(res);
-@@ -90,7 +89,6 @@ output:
+@@ -90,7 +88,6 @@ output:
              goto end;
          }
      }
@@ -1288,17 +1148,16 @@
          /* Prepend a space in front of negative numbers (ticket #57) */
 --- a/psycopg/adapter_pfloat.c
 +++ b/psycopg/adapter_pfloat.c
-@@ -54,8 +54,7 @@ pfloat_getquoted(pfloatObject *self, PyObject *args)
+@@ -54,8 +54,6 @@ pfloat_getquoted(pfloatObject *self, PyObject *args)
              goto exit;
          }
  
 -#if PY_3
 -        /* unicode to bytes in Py3 */
-+        /* unicode to bytes */
          {
              PyObject *tmp = PyUnicode_AsUTF8String(rv);
              Py_DECREF(rv);
-@@ -63,7 +62,6 @@ pfloat_getquoted(pfloatObject *self, PyObject *args)
+@@ -63,7 +61,6 @@ pfloat_getquoted(pfloatObject *self, PyObject *args)
                  goto exit;
              }
          }
@@ -1321,17 +1180,16 @@
          res = PyObject_Str(self->wrapped);
      } else {
          PyObject *tmp;
-@@ -60,8 +56,7 @@ pint_getquoted(pintObject *self, PyObject *args)
+@@ -60,8 +56,6 @@ pint_getquoted(pintObject *self, PyObject *args)
          goto exit;
      }
  
 -#if PY_3
 -    /* unicode to bytes in Py3 */
-+    /* unicode to bytes */
      {
          PyObject *tmp = PyUnicode_AsUTF8String(res);
          Py_DECREF(res);
-@@ -69,7 +64,6 @@ pint_getquoted(pintObject *self, PyObject *args)
+@@ -69,7 +63,6 @@ pint_getquoted(pintObject *self, PyObject *args)
              goto exit;
          }
      }
@@ -1339,6 +1197,59 @@
  
      if ('-' == Bytes_AS_STRING(res)[0]) {
          /* Prepend a space in front of negative numbers (ticket #57) */
+--- a/psycopg/column_type.c
++++ b/psycopg/column_type.c
+@@ -97,17 +97,36 @@ column_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+ static int
+ column_init(columnObject *self, PyObject *args, PyObject *kwargs)
+ {
++    PyObject *name = NULL;
++    PyObject *type_code = NULL;
++    PyObject *display_size = NULL;
++    PyObject *internal_size = NULL;
++    PyObject *precision = NULL;
++    PyObject *scale = NULL;
++    PyObject *null_ok = NULL;
++    PyObject *table_oid = NULL;
++    PyObject *table_column = NULL;
++
+     static char *kwlist[] = {
+         "name", "type_code", "display_size", "internal_size",
+         "precision", "scale", "null_ok", "table_oid", "table_column", NULL};
+ 
+     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|OOOOOOOOO", kwlist,
+-            &self->name, &self->type_code, &self->display_size,
+-            &self->internal_size, &self->precision, &self->scale,
+-            &self->null_ok, &self->table_oid, &self->table_column)) {
++            &name, &type_code, &display_size, &internal_size, &precision,
++            &scale, &null_ok, &table_oid, &table_column)) {
+         return -1;
+     }
+ 
++    Py_XINCREF(name); self->name = name;
++    Py_XINCREF(type_code); self->type_code = type_code;
++    Py_XINCREF(display_size); self->display_size = display_size;
++    Py_XINCREF(internal_size); self->internal_size = internal_size;
++    Py_XINCREF(precision); self->precision = precision;
++    Py_XINCREF(scale); self->scale = scale;
++    Py_XINCREF(null_ok); self->null_ok = null_ok;
++    Py_XINCREF(table_oid); self->table_oid = table_oid;
++    Py_XINCREF(table_column); self->table_column = table_column;
++
+     return 0;
+ }
+ 
+--- a/psycopg/connection.h
++++ b/psycopg/connection.h
+@@ -145,6 +145,8 @@ struct connectionObject {
+ 
+     /* the pid this connection was created into */
+     pid_t procpid;
++
++    int entered;
+ };
+ 
+ /* map isolation level values into a numeric const */
 --- a/psycopg/connection_int.c
 +++ b/psycopg/connection_int.c
 @@ -33,6 +33,7 @@
@@ -1374,6 +1285,40 @@
  #include <string.h>
  #include <ctype.h>
  
+@@ -406,10 +407,22 @@ psyco_conn_tpc_recover(connectionObject *self, PyObject *dummy)
+ static PyObject *
+ psyco_conn_enter(connectionObject *self, PyObject *dummy)
+ {
++    PyObject *rv = NULL;
++
+     EXC_IF_CONN_CLOSED(self);
+ 
++    if (self->entered) {
++        PyErr_SetString(ProgrammingError,
++            "the connection cannot be re-entered recursively");
++        goto exit;
++    }
++
++    self->entered = 1;
+     Py_INCREF(self);
+-    return (PyObject *)self;
++    rv = (PyObject *)self;
++
++exit:
++    return rv;
+ }
+ 
+ 
+@@ -427,6 +440,9 @@ psyco_conn_exit(connectionObject *self, PyObject *args)
+         goto exit;
+     }
+ 
++    /* even if there will be an error, consider ourselves out */
++    self->entered = 0;
++
+     if (type == Py_None) {
+         if (!(tmp = PyObject_CallMethod((PyObject *)self, "commit", NULL))) {
+             goto exit;
 --- a/psycopg/cursor_type.c
 +++ b/psycopg/cursor_type.c
 @@ -1133,7 +1133,7 @@ exit:
@@ -1385,12 +1330,171 @@
      Py_XDECREF(pname);
      Py_XDECREF(pnames);
      Py_XDECREF(operation);
-@@ -1919,10 +1919,11 @@ cursor_setup(cursorObject *self, connectionObject *conn, const char *name)
+@@ -1303,11 +1303,9 @@ exit:
+ /* Return a newly allocated buffer containing the list of columns to be
+  * copied. On error return NULL and set an exception.
+  */
+-static char *_psyco_curs_copy_columns(PyObject *columns)
++static char *_psyco_curs_copy_columns(cursorObject *self, PyObject *columns)
+ {
+     PyObject *col, *coliter;
+-    Py_ssize_t collen;
+-    char *colname;
+     char *columnlist = NULL;
+     Py_ssize_t bufsize = 512;
+     Py_ssize_t offset = 1;
+@@ -1333,15 +1331,28 @@ static char *_psyco_curs_copy_columns(PyObject *columns)
+     columnlist[0] = '(';
  
+     while ((col = PyIter_Next(coliter)) != NULL) {
++        Py_ssize_t collen;
++        char *colname;
++        char *quoted_colname;
++
+         if (!(col = psyco_ensure_bytes(col))) {
+             Py_DECREF(coliter);
+             goto error;
+         }
+         Bytes_AsStringAndSize(col, &colname, &collen);
++        if (!(quoted_colname = psyco_escape_identifier(
++                self->conn, colname, collen))) {
++            Py_DECREF(col);
++            Py_DECREF(coliter);
++            goto error;
++        }
++        collen = strlen(quoted_colname);
++
+         while (offset + collen > bufsize - 2) {
+             char *tmp;
+             bufsize *= 2;
+             if (NULL == (tmp = PyMem_Realloc(columnlist, bufsize))) {
++                PQfreemem(quoted_colname);
+                 Py_DECREF(col);
+                 Py_DECREF(coliter);
+                 PyErr_NoMemory();
+@@ -1349,10 +1360,11 @@ static char *_psyco_curs_copy_columns(PyObject *columns)
+             }
+             columnlist = tmp;
+         }
+-        strncpy(&columnlist[offset], colname, collen);
++        strncpy(&columnlist[offset], quoted_colname, collen);
+         offset += collen;
+         columnlist[offset++] = ',';
+         Py_DECREF(col);
++        PQfreemem(quoted_colname);
+     }
+     Py_DECREF(coliter);
+ 
+@@ -1399,8 +1411,9 @@ curs_copy_from(cursorObject *self, PyObject *args, PyObject *kwargs)
+     char *columnlist = NULL;
+     char *quoted_delimiter = NULL;
+     char *quoted_null = NULL;
+-
++    char *quoted_table_name = NULL;
+     const char *table_name;
++
+     Py_ssize_t bufsize = DEFAULT_COPYBUFF;
+     PyObject *file, *columns = NULL, *res = NULL;
+ 
+@@ -1421,8 +1434,9 @@ curs_copy_from(cursorObject *self, PyObject *args, PyObject *kwargs)
+     EXC_IF_GREEN(copy_from);
+     EXC_IF_TPC_PREPARED(self->conn, copy_from);
+ 
+-    if (NULL == (columnlist = _psyco_curs_copy_columns(columns)))
++    if (!(columnlist = _psyco_curs_copy_columns(self, columns))) {
+         goto exit;
++    }
+ 
+     if (!(quoted_delimiter = psyco_escape_string(
+             self->conn, sep, -1, NULL, NULL))) {
+@@ -1434,7 +1448,12 @@ curs_copy_from(cursorObject *self, PyObject *args, PyObject *kwargs)
+         goto exit;
+     }
+ 
+-    query_size = strlen(command) + strlen(table_name) + strlen(columnlist)
++    if (!(quoted_table_name = psyco_escape_identifier(
++            self->conn, table_name, -1))) {
++        goto exit;
++    }
++
++    query_size = strlen(command) + strlen(quoted_table_name) + strlen(columnlist)
+         + strlen(quoted_delimiter) + strlen(quoted_null) + 1;
+     if (!(query = PyMem_New(char, query_size))) {
+         PyErr_NoMemory();
+@@ -1442,7 +1461,7 @@ curs_copy_from(cursorObject *self, PyObject *args, PyObject *kwargs)
+     }
+ 
+     PyOS_snprintf(query, query_size, command,
+-        table_name, columnlist, quoted_delimiter, quoted_null);
++        quoted_table_name, columnlist, quoted_delimiter, quoted_null);
+ 
+     Dprintf("curs_copy_from: query = %s", query);
+ 
+@@ -1469,6 +1488,9 @@ curs_copy_from(cursorObject *self, PyObject *args, PyObject *kwargs)
+     Py_CLEAR(self->copyfile);
+ 
+ exit:
++    if (quoted_table_name) {
++        PQfreemem(quoted_table_name);
++    }
+     PyMem_Free(columnlist);
+     PyMem_Free(quoted_delimiter);
+     PyMem_Free(quoted_null);
+@@ -1499,6 +1521,7 @@ curs_copy_to(cursorObject *self, PyObject *args, PyObject *kwargs)
+     char *quoted_null = NULL;
+ 
+     const char *table_name;
++    char *quoted_table_name = NULL;
+     PyObject *file = NULL, *columns = NULL, *res = NULL;
+ 
+     if (!PyArg_ParseTupleAndKeywords(
+@@ -1518,8 +1541,14 @@ curs_copy_to(cursorObject *self, PyObject *args, PyObject *kwargs)
+     EXC_IF_GREEN(copy_to);
+     EXC_IF_TPC_PREPARED(self->conn, copy_to);
+ 
+-    if (NULL == (columnlist = _psyco_curs_copy_columns(columns)))
++    if (!(quoted_table_name = psyco_escape_identifier(
++            self->conn, table_name, -1))) {
++        goto exit;
++    }
++
++    if (!(columnlist = _psyco_curs_copy_columns(self, columns))) {
+         goto exit;
++    }
+ 
+     if (!(quoted_delimiter = psyco_escape_string(
+             self->conn, sep, -1, NULL, NULL))) {
+@@ -1531,7 +1560,7 @@ curs_copy_to(cursorObject *self, PyObject *args, PyObject *kwargs)
+         goto exit;
+     }
+ 
+-    query_size = strlen(command) + strlen(table_name) + strlen(columnlist)
++    query_size = strlen(command) + strlen(quoted_table_name) + strlen(columnlist)
+         + strlen(quoted_delimiter) + strlen(quoted_null) + 1;
+     if (!(query = PyMem_New(char, query_size))) {
+         PyErr_NoMemory();
+@@ -1539,7 +1568,7 @@ curs_copy_to(cursorObject *self, PyObject *args, PyObject *kwargs)
+     }
+ 
+     PyOS_snprintf(query, query_size, command,
+-        table_name, columnlist, quoted_delimiter, quoted_null);
++        quoted_table_name, columnlist, quoted_delimiter, quoted_null);
+ 
+     Dprintf("curs_copy_to: query = %s", query);
+ 
+@@ -1560,6 +1589,9 @@ curs_copy_to(cursorObject *self, PyObject *args, PyObject *kwargs)
+     Py_CLEAR(self->copyfile);
+ 
+ exit:
++    if (quoted_table_name) {
++        PQfreemem(quoted_table_name);
++    }
+     PyMem_Free(columnlist);
+     PyMem_Free(quoted_delimiter);
+     PyMem_Free(quoted_null);
+@@ -1920,9 +1952,8 @@ cursor_setup(cursorObject *self, connectionObject *conn, const char *name)
      /* default tzinfo factory */
      {
-+        /* The datetime api doesn't seem to have a constructor to make a
-+         * datetime.timezone, so use the Python interface. */
          PyObject *m = NULL;
 -        if ((m = PyImport_ImportModule("psycopg2.tz"))) {
 -            self->tzinfo_factory = PyObject_GetAttrString(
@@ -1460,6 +1564,72 @@
  #ifdef _WIN32
  /* select() */
  #include <winsock2.h>
+@@ -347,14 +348,19 @@ pq_begin_locked(connectionObject *conn, PyThreadState **tstate)
+     char buf[256];  /* buf size must be same as bufsize */
+     int result;
+ 
+-    Dprintf("pq_begin_locked: pgconn = %p, autocommit = %d, status = %d",
++    Dprintf("pq_begin_locked: pgconn = %p, %d, status = %d",
+             conn->pgconn, conn->autocommit, conn->status);
+ 
+-    if (conn->autocommit || conn->status != CONN_STATUS_READY) {
++    if (conn->status != CONN_STATUS_READY) {
+         Dprintf("pq_begin_locked: transaction in progress");
+         return 0;
+     }
+ 
++    if (conn->autocommit && !conn->entered) {
++        Dprintf("pq_begin_locked: autocommit and no with block");
++        return 0;
++    }
++
+     if (conn->isolevel == ISOLATION_LEVEL_DEFAULT
+             && conn->readonly == STATE_DEFAULT
+             && conn->deferrable == STATE_DEFAULT) {
+@@ -393,10 +399,10 @@ pq_commit(connectionObject *conn)
+     Py_BEGIN_ALLOW_THREADS;
+     pthread_mutex_lock(&conn->lock);
+ 
+-    Dprintf("pq_commit: pgconn = %p, autocommit = %d, status = %d",
+-            conn->pgconn, conn->autocommit, conn->status);
++    Dprintf("pq_commit: pgconn = %p, status = %d",
++            conn->pgconn, conn->status);
+ 
+-    if (conn->autocommit || conn->status != CONN_STATUS_BEGIN) {
++    if (conn->status != CONN_STATUS_BEGIN) {
+         Dprintf("pq_commit: no transaction to commit");
+         retvalue = 0;
+     }
+@@ -427,10 +433,10 @@ pq_abort_locked(connectionObject *conn, PyThreadState **tstate)
+ {
+     int retvalue = -1;
+ 
+-    Dprintf("pq_abort_locked: pgconn = %p, autocommit = %d, status = %d",
+-            conn->pgconn, conn->autocommit, conn->status);
++    Dprintf("pq_abort_locked: pgconn = %p, status = %d",
++            conn->pgconn, conn->status);
+ 
+-    if (conn->autocommit || conn->status != CONN_STATUS_BEGIN) {
++    if (conn->status != CONN_STATUS_BEGIN) {
+         Dprintf("pq_abort_locked: no transaction to abort");
+         return 0;
+     }
+@@ -488,12 +494,12 @@ pq_reset_locked(connectionObject *conn, PyThreadState **tstate)
+ {
+     int retvalue = -1;
+ 
+-    Dprintf("pq_reset_locked: pgconn = %p, autocommit = %d, status = %d",
+-            conn->pgconn, conn->autocommit, conn->status);
++    Dprintf("pq_reset_locked: pgconn = %p, status = %d",
++            conn->pgconn, conn->status);
+ 
+     conn->mark += 1;
+ 
+-    if (!conn->autocommit && conn->status == CONN_STATUS_BEGIN) {
++    if (conn->status == CONN_STATUS_BEGIN) {
+         retvalue = pq_execute_command_locked(conn, "ABORT", tstate);
+         if (retvalue != 0) return retvalue;
+     }
 --- a/psycopg/psycopgmodule.c
 +++ b/psycopg/psycopgmodule.c
 @@ -53,15 +53,12 @@
@@ -1549,7 +1719,30 @@
      /* Success! */
      rv = 0;
  
-@@ -959,34 +916,6 @@ datetime_init(void)
+@@ -608,6 +565,10 @@ encodings_init(PyObject *module)
+     int rv = -1;
+ 
+     Dprintf("psycopgmodule: initializing encodings table");
++    if (psycoEncodings) {
++        Dprintf("encodings_init(): already called");
++        return 0;
++    }
+ 
+     if (!(psycoEncodings = PyDict_New())) { goto exit; }
+     Py_INCREF(psycoEncodings);
+@@ -770,9 +731,8 @@ sqlstate_errors_init(PyObject *module)
+     Dprintf("psycopgmodule: initializing sqlstate exceptions");
+ 
+     if (sqlstate_errors) {
+-        PyErr_SetString(PyExc_SystemError,
+-            "sqlstate_errors_init(): already called");
+-        goto exit;
++		Dprintf("sqlstate_errors_init(): already called");
++        return 0;
+     }
+     if (!(errmodule = PyImport_ImportModule("psycopg2.errors"))) {
+         /* don't inject the exceptions into the errors module */
+@@ -956,34 +916,6 @@ datetime_init(void)
      return 0;
  }
  
@@ -1584,7 +1777,7 @@
  /** method table and module initialization **/
  
  static PyMethodDef psycopgMethods[] = {
-@@ -1030,18 +959,6 @@ static PyMethodDef psycopgMethods[] = {
+@@ -1027,18 +959,6 @@ static PyMethodDef psycopgMethods[] = {
      {"IntervalFromPy",  (PyCFunction)psyco_IntervalFromPy,
       METH_VARARGS, psyco_IntervalFromPy_doc},
  
@@ -1603,7 +1796,7 @@
      {"set_wait_callback",  (PyCFunction)psyco_set_wait_callback,
       METH_O, psyco_set_wait_callback_doc},
      {"get_wait_callback",  (PyCFunction)psyco_get_wait_callback,
-@@ -1052,7 +969,6 @@ static PyMethodDef psycopgMethods[] = {
+@@ -1049,7 +969,6 @@ static PyMethodDef psycopgMethods[] = {
      {NULL, NULL, 0, NULL}        /* Sentinel */
  };
  
@@ -1611,7 +1804,7 @@
  static struct PyModuleDef psycopgmodule = {
          PyModuleDef_HEAD_INIT,
          "_psycopg",
-@@ -1064,7 +980,6 @@ static struct PyModuleDef psycopgmodule = {
+@@ -1061,7 +980,6 @@ static struct PyModuleDef psycopgmodule = {
          NULL,
          NULL
  };
@@ -1619,7 +1812,7 @@
  
  #ifndef PyMODINIT_FUNC	/* declarations for DLL import/export */
  #define PyMODINIT_FUNC void
-@@ -1086,41 +1001,35 @@ INIT_MODULE(_psycopg)(void)
+@@ -1083,41 +1001,35 @@ INIT_MODULE(_psycopg)(void)
  
      /* initialize types and objects not exposed to the module */
      Py_SET_TYPE(&typecastType, &PyType_Type);
@@ -1860,16 +2053,9 @@
  static const char *
  skip_until_space2(const char *s, Py_ssize_t *len)
  {
-@@ -82,11 +73,11 @@ typecast_parse_date(const char* s, const char** t, Py_ssize_t* len,
-         cz += 1;
-     }
- 
--    /* Is this a BC date?  If so, adjust the year value.  Note that
--     * mx.DateTime numbers BC dates from zero rather than one.  The
--     * Python datetime module does not support BC dates at all. */
-+    /* Is this a BC date?  If so, adjust the year value.  However
-+     * Python datetime module does not support BC dates, so this will raise
-+     * an exception downstream. */
+@@ -86,7 +77,7 @@ typecast_parse_date(const char* s, const char** t, Py_ssize_t* len,
+      * mx.DateTime numbers BC dates from zero rather than one.  The
+      * Python datetime module does not support BC dates at all. */
      if (*len >= 2 && s[*len-2] == 'B' && s[*len-1] == 'C')
 -        *year = 1 - (*year);
 +        *year = -(*year);
@@ -2075,165 +2261,8 @@
  
  exit:
      Py_XDECREF((PyObject *)chunk);
---- a/psycopg/typecast_datetime.c
-+++ b/psycopg/typecast_datetime.c
-@@ -71,7 +71,6 @@ typecast_PYDATE_cast(const char *str, Py_ssize_t len, PyObject *curs)
-             return NULL;
-         }
-         else {
--            if (y > 9999) y = 9999;
-             obj = PyObject_CallFunction(
-                 (PyObject*)PyDateTimeAPI->DateType, "iii", y, m, d);
-         }
-@@ -104,9 +103,8 @@ _parse_inftz(const char *str, PyObject *curs)
-         goto exit;
-     }
- 
--    if (!(tzinfo = PyObject_CallFunction(tzinfo_factory, "i", 0))) {
--        goto exit;
--    }
-+    tzinfo = PyDateTime_TimeZone_UTC;
-+    Py_INCREF(tzinfo);
- 
-     /* m.replace(tzinfo=tzinfo) */
-     if (!(args = PyTuple_New(0))) { goto exit; }
-@@ -129,10 +127,11 @@ static PyObject *
- _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
- {
-     PyObject* rv = NULL;
-+    PyObject *tzoff = NULL;
-     PyObject *tzinfo = NULL;
-     PyObject *tzinfo_factory;
-     int n, y=0, m=0, d=0;
--    int hh=0, mm=0, ss=0, us=0, tz=0;
-+    int hh=0, mm=0, ss=0, us=0, tzsec=0;
-     const char *tp = NULL;
- 
-     Dprintf("typecast_PYDATETIMETZ_cast: s = %s", str);
-@@ -147,11 +146,11 @@ _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
-     }
- 
-     if (len > 0) {
--        n = typecast_parse_time(tp, NULL, &len, &hh, &mm, &ss, &us, &tz);
-+        n = typecast_parse_time(tp, NULL, &len, &hh, &mm, &ss, &us, &tzsec);
-         Dprintf("typecast_PYDATETIMETZ_cast: n = %d,"
-             " len = " FORMAT_CODE_PY_SSIZE_T ","
--            " hh = %d, mm = %d, ss = %d, us = %d, tz = %d",
--            n, len, hh, mm, ss, us, tz);
-+            " hh = %d, mm = %d, ss = %d, us = %d, tzsec = %d",
-+            n, len, hh, mm, ss, us, tzsec);
-         if (n < 3 || n > 6) {
-             PyErr_SetString(DataError, "unable to parse time");
-             goto exit;
-@@ -162,21 +161,16 @@ _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
-         mm += 1;
-         ss -= 60;
-     }
--    if (y > 9999)
--        y = 9999;
- 
-     tzinfo_factory = ((cursorObject *)curs)->tzinfo_factory;
-     if (n >= 5 && tzinfo_factory != Py_None) {
-         /* we have a time zone, calculate minutes and create
-            appropriate tzinfo object calling the factory */
--        Dprintf("typecast_PYDATETIMETZ_cast: UTC offset = %ds", tz);
--
--        /* The datetime module requires that time zone offsets be
--           a whole number of minutes, so truncate the seconds to the
--           closest minute. */
--        // printf("%d %d %d\n", tz, tzmin, round(tz / 60.0));
--        if (!(tzinfo = PyObject_CallFunction(tzinfo_factory, "i",
--                (int)round(tz / 60.0)))) {
-+        Dprintf("typecast_PYDATETIMETZ_cast: UTC offset = %ds", tzsec);
-+
-+        if (!(tzoff = PyDelta_FromDSU(0, tzsec, 0))) { goto exit; }
-+        if (!(tzinfo = PyObject_CallFunctionObjArgs(
-+                tzinfo_factory, tzoff, NULL))) {
-             goto exit;
-         }
-     } else {
-@@ -192,6 +186,7 @@ _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
-         y, m, d, hh, mm, ss, us, tzinfo);
- 
- exit:
-+    Py_XDECREF(tzoff);
-     Py_XDECREF(tzinfo);
-     return rv;
- }
-@@ -232,17 +227,18 @@ typecast_PYDATETIMETZ_cast(const char *str, Py_ssize_t len, PyObject *curs)
- static PyObject *
- typecast_PYTIME_cast(const char *str, Py_ssize_t len, PyObject *curs)
- {
--    PyObject* obj = NULL;
-+    PyObject* rv = NULL;
-+    PyObject *tzoff = NULL;
-     PyObject *tzinfo = NULL;
-     PyObject *tzinfo_factory;
--    int n, hh=0, mm=0, ss=0, us=0, tz=0;
-+    int n, hh=0, mm=0, ss=0, us=0, tzsec=0;
- 
-     if (str == NULL) { Py_RETURN_NONE; }
- 
--    n = typecast_parse_time(str, NULL, &len, &hh, &mm, &ss, &us, &tz);
-+    n = typecast_parse_time(str, NULL, &len, &hh, &mm, &ss, &us, &tzsec);
-     Dprintf("typecast_PYTIME_cast: n = %d, len = " FORMAT_CODE_PY_SSIZE_T ", "
--            "hh = %d, mm = %d, ss = %d, us = %d, tz = %d",
--            n, len, hh, mm, ss, us, tz);
-+            "hh = %d, mm = %d, ss = %d, us = %d, tzsec = %d",
-+            n, len, hh, mm, ss, us, tzsec);
- 
-     if (n < 3 || n > 6) {
-         PyErr_SetString(DataError, "unable to parse time");
-@@ -254,25 +250,25 @@ typecast_PYTIME_cast(const char *str, Py_ssize_t len, PyObject *curs)
-     }
-     tzinfo_factory = ((cursorObject *)curs)->tzinfo_factory;
-     if (n >= 5 && tzinfo_factory != Py_None) {
--        /* we have a time zone, calculate minutes and create
-+        /* we have a time zone, calculate seconds and create
-            appropriate tzinfo object calling the factory */
--        Dprintf("typecast_PYTIME_cast: UTC offset = %ds", tz);
-+        Dprintf("typecast_PYTIME_cast: UTC offset = %ds", tzsec);
- 
--        /* The datetime module requires that time zone offsets be
--           a whole number of minutes, so truncate the seconds to the
--           closest minute. */
--        tzinfo = PyObject_CallFunction(tzinfo_factory, "i",
--            (int)round(tz / 60.0));
-+        if (!(tzoff = PyDelta_FromDSU(0, tzsec, 0))) { goto exit; }
-+        if (!(tzinfo = PyObject_CallFunctionObjArgs(tzinfo_factory, tzoff, NULL))) {
-+            goto exit;
-+        }
-     } else {
-         Py_INCREF(Py_None);
-         tzinfo = Py_None;
-     }
--    if (tzinfo != NULL) {
--        obj = PyObject_CallFunction((PyObject*)PyDateTimeAPI->TimeType, "iiiiO",
--                                    hh, mm, ss, us, tzinfo);
--        Py_DECREF(tzinfo);
--    }
--    return obj;
-+    rv = PyObject_CallFunction((PyObject*)PyDateTimeAPI->TimeType, "iiiiO",
-+                                hh, mm, ss, us, tzinfo);
-+
-+exit:
-+    Py_XDECREF(tzoff);
-+    Py_XDECREF(tzinfo);
-+    return rv;
- }
- 
- 
 --- a/psycopg/utils.c
 +++ b/psycopg/utils.c
-@@ -190,7 +190,7 @@ psyco_ensure_bytes(PyObject *obj)
- 
- /* Take a Python object and return text from it.
-  *
-- * On Py3 this means converting bytes to unicode. On Py2 bytes are fine.
-+ * This means converting bytes to unicode.
-  *
-  * The function is ref neutral: steals a ref from obj and adds one to the
-  * return value.  It is safe to call it on NULL.
 @@ -198,9 +198,6 @@ psyco_ensure_bytes(PyObject *obj)
  STEALS(1) PyObject *
  psyco_ensure_text(PyObject *obj)
@@ -2252,16 +2281,7 @@
  }
  
  /* Check if a file derives from TextIOBase.
-@@ -309,24 +305,13 @@ exit:
- 
- /* Convert a C string into Python Text using a specified codec.
-  *
-- * The codec is the python function codec.getdecoder(enc). It is only used on
-- * Python 3 to return unicode: in Py2 the function returns a string.
-+ * The codec is the python function codec.getdecoder(enc).
-  *
-  * len is optional: use -1 to have it calculated by the function.
-  */
+@@ -317,16 +313,6 @@ exit:
  PyObject *
  psyco_text_from_chars_safe(const char *str, Py_ssize_t len, PyObject *decoder)
  {
@@ -2278,7 +2298,7 @@
      static PyObject *replace = NULL;
      PyObject *rv = NULL;
      PyObject *b = NULL;
-@@ -356,8 +341,6 @@ exit:
+@@ -356,8 +342,6 @@ exit:
      Py_XDECREF(t);
      Py_XDECREF(b);
      return rv;
@@ -2287,7 +2307,7 @@
  }
  
  
-@@ -409,26 +392,8 @@ psyco_set_error(PyObject *exc, cursorObject *curs, const char *msg)
+@@ -409,26 +393,8 @@ psyco_set_error(PyObject *exc, cursorObject *curs, const char *msg)
  static int
  psyco_is_main_interp(void)
  {
@@ -2316,7 +2336,14 @@
  /* psyco_get_decimal_type
 --- a/setup.cfg
 +++ b/setup.cfg
-@@ -7,10 +7,6 @@ define=
+@@ -1,16 +1,12 @@
+ [build_ext]
+ # PSYCOPG_DEBUG can be added to enable verbose debug information
+-define=
++define=PSYCOPG_DEBUG
+ 
+ # "pg_config" is required to locate PostgreSQL headers and libraries needed to
+ # build psycopg2. If pg_config is not in the path or is installed under a
  # different name set the following option to the pg_config full path.
  pg_config=
  
@@ -2355,6 +2382,15 @@
  
  try:
      import configparser
+@@ -48,7 +44,7 @@ except ImportError:
+ # Take a look at https://www.python.org/dev/peps/pep-0440/
+ # for a consistent versioning pattern.
+ 
+-PSYCOPG_VERSION = '2.8.6'
++PSYCOPG_VERSION = '2.8.6.post1'
+ 
+ 
+ # note: if you are changing the list of supported Python version please fix
 @@ -58,14 +54,11 @@ Development Status :: 5 - Production/Stable
  Intended Audience :: Developers
  License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)
@@ -2479,12 +2515,11 @@
      def finalize_win32(self):
          """Finalize build system configuration on win32 platform."""
  
-@@ -412,6 +373,18 @@ For further information please check the 'doc/src/install.rst' file (also at
+@@ -412,6 +373,17 @@ For further information please check the 'doc/src/install.rst' file (also at
              self.library_dirs.append(pg_config_helper.query("libdir"))
              self.include_dirs.append(pg_config_helper.query("includedir"))
              self.include_dirs.append(pg_config_helper.query("includedir-server"))
 +
-+            # if present, add includedirs from cppflags, libdirs from ldflags
 +            tokens = pg_config_helper.query("ldflags", empty_ok=True).split()
 +            for token in tokens:
 +                if token.startswith("-L"):
@@ -2498,7 +2533,7 @@
              pgversion = pg_config_helper.query("version").split()[1]
  
              verre = re.compile(
-@@ -431,8 +404,8 @@ For further information please check the 'doc/src/install.rst' file (also at
+@@ -431,8 +403,8 @@ For further information please check the 'doc/src/install.rst' file (also at
                  pgpatch = int(pgpatch)
              else:
                  sys.stderr.write(
@@ -2509,7 +2544,7 @@
                  sys.exit(1)
  
              define_macros.append(("PG_VERSION_NUM", "%d%02d%02d" %
-@@ -454,7 +427,7 @@ For further information please check the 'doc/src/install.rst' file (also at
+@@ -454,7 +426,7 @@ For further information please check the 'doc/src/install.rst' file (also at
  
          except Warning:
              w = sys.exc_info()[1]  # work around py 2/3 different syntax
@@ -2518,7 +2553,7 @@
              sys.exit(1)
  
          if hasattr(self, "finalize_" + sys.platform):
-@@ -524,30 +497,12 @@ depends = [
+@@ -524,30 +496,12 @@ depends = [
  parser = configparser.ConfigParser()
  parser.read('setup.cfg')
  
@@ -2550,7 +2585,7 @@
  else:
      PSYCOPG_VERSION_EX = PSYCOPG_VERSION
  
-@@ -599,7 +554,7 @@ setup(name="psycopg2",
+@@ -599,7 +553,7 @@ setup(name="psycopg2",
        url="https://psycopg.org/",
        license="LGPL with exceptions",
        platforms=["any"],
