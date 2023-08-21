@@ -129,21 +129,21 @@ RUN cleanup ; \
 
 ## ---
 
-FROM ${IMAGE_PATH}/${STAGE_IMAGE} as uwsgi
+FROM ${BUILDER_INTERIM_IMAGE} as uwsgi
 SHELL [ "/bin/sh", "-ec" ]
 
 ENV UWSGI_PROFILE_OVERRIDE='malloc_implementation=jemalloc;pcre=true;ssl=false;xml=false'
 ENV UWSGI_BUILD_DEPS='libjemalloc-dev libpcre2-dev'
-ENV APPEND_CFLAGS='-g -O3 -flto=1 -fuse-linker-plugin -ffat-lto-objects -flto-partition=none'
 
 COPY --from=uwsgi-prepare  /app/uwsgi.tar.gz  /app/
 
-WORKDIR /app/uwsgi
+WORKDIR /app
 
 RUN apt-list-installed > apt.deps.0
 
 ## build uwsgi
-RUN apt-wrap-python -d "${UWSGI_BUILD_DEPS}" \
+RUN export APPEND_CFLAGS="$( . /opt/flags ; printf '%s' "${CFLAGS}" )" ; \
+    apt-wrap-python -d "${UWSGI_BUILD_DEPS}" \
       -p "/usr/local:${SITE_PACKAGES}" \
         pip -v install /app/uwsgi.tar.gz ; \
     rm /app/uwsgi.tar.gz ; \
@@ -151,10 +151,12 @@ RUN apt-wrap-python -d "${UWSGI_BUILD_DEPS}" \
 
 RUN apt-list-installed > apt.deps.1 ; \
     set +e ; \
-    grep -Fvx -f apt.deps.0 apt.deps.1 > apt.deps ; \
+    grep -Fvx -f apt.deps.0 apt.deps.1 > apt.deps.uwsgi ; \
     rm -f apt.deps.0 apt.deps.1
 
 ARG UWSGI_DOGSTATSD_GITREF
+
+WORKDIR /app/uwsgi
 
 ## build uwsgi-dogstatsd
 RUN mkdir /tmp/uwsgi-dogstatsd /tmp/uwsgi-dogstatsd.build ; \
@@ -186,7 +188,7 @@ ENV SENTRY_BUILD_DEPS='libffi-dev libjpeg-dev libmaxminddb-dev libpq-dev libxmls
 ARG UWSGI_INTERIM_IMAGE
 
 ## copy uwsgi and dependencies
-COPY --from=${UWSGI_INTERIM_IMAGE}  /app/uwsgi/        /app/uwsgi/
+COPY --from=${UWSGI_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${UWSGI_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${UWSGI_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
@@ -194,7 +196,7 @@ COPY --from=sentry-prepare  /app/sentry.tar.gz  /app/
 
 WORKDIR /app
 
-RUN xargs -r -a /app/uwsgi/apt.deps apt-install ; \
+RUN xargs -r -a /app/apt.deps.uwsgi apt-install ; \
     apt-list-installed > apt.deps.0
 
 ## install sentry "in-place"
@@ -212,7 +214,7 @@ RUN tar -xf /app/sentry.tar.gz ; \
     python -c 'import maxminddb.extension; maxminddb.extension.Reader'
 
 RUN apt-list-installed > apt.deps.1 ; \
-    cp /app/uwsgi/apt.deps ./ ; \
+    cp /app/apt.deps.uwsgi ./apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
@@ -225,7 +227,7 @@ SHELL [ "/bin/sh", "-ec" ]
 ARG UWSGI_INTERIM_IMAGE
 
 ## copy uwsgi and dependencies
-COPY --from=${UWSGI_INTERIM_IMAGE}  /app/uwsgi/        /app/uwsgi/
+COPY --from=${UWSGI_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${UWSGI_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${UWSGI_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
@@ -233,7 +235,7 @@ COPY --from=snuba-prepare  /app/snuba.tar.gz  /app/
 
 WORKDIR /app
 
-RUN xargs -r -a /app/uwsgi/apt.deps apt-install ; \
+RUN xargs -r -a /app/apt.deps.uwsgi apt-install ; \
     apt-list-installed > apt.deps.0
 
 ## install snuba "in-place"
@@ -250,7 +252,7 @@ RUN tar -xf /app/snuba.tar.gz ; \
     snuba --version
 
 RUN apt-list-installed > apt.deps.1 ; \
-    cp /app/uwsgi/apt.deps ./ ; \
+    cp /app/apt.deps.uwsgi ./apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
