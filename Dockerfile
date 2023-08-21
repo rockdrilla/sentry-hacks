@@ -6,6 +6,8 @@ ARG PYTHON_VERSION
 ARG BUILDER_INTERIM_IMAGE
 ARG UWSGI_INTERIM_IMAGE
 ARG LIBRDKAFKA_INTERIM_IMAGE
+ARG SENTRY_DEPS_INTERIM_IMAGE
+ARG SNUBA_DEPS_INTERIM_IMAGE
 ARG HELPER_IMAGE=${DISTRO}-buildd:${SUITE}
 ARG STAGE_IMAGE=python-dev:${PYTHON_VERSION}-${SUITE}
 ARG BASE_IMAGE=python-min:${PYTHON_VERSION}-${SUITE}
@@ -305,10 +307,9 @@ RUN quiet apt-install binutils ; \
 
 ## ---
 
-FROM ${BUILDER_INTERIM_IMAGE} as sentry-aldente
+FROM ${BUILDER_INTERIM_IMAGE} as sentry-deps
 SHELL [ "/bin/sh", "-ec" ]
 
-ENV SENTRY_LIGHT_BUILD=1
 ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
 ENV BUILD_FROM_SRC='cffi,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,python-rapidjson,pyyaml,regex,simplejson,zstandard'
 
@@ -325,34 +326,31 @@ COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-COPY --from=sentry-prepare    /app/sentry.tar.gz         /app/
 COPY --from=xmlsec-prepare    /app/python-xmlsec.tar.gz  /app/
 COPY --from=psycopg2-prepare  /app/psycopg2.tar.gz       /app/
 
+COPY /sentry/  /tmp/sentry/
+
 WORKDIR /app
 
-RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
+RUN cat apt.deps.uwsgi apt.deps.librdkafka \
     | sort -uV | xargs -r apt-install ; \
+    ldconfig ; \
     apt-list-installed > apt.deps.0
 
 ## install python-xmlsec
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install -I --no-binary "${BUILD_FROM_SRC}" /app/python-xmlsec.tar.gz ; \
-    rm /app/python-xmlsec.tar.gz
+      pip -v install --no-binary "${BUILD_FROM_SRC}" ./python-xmlsec.tar.gz ; \
+    rm python-xmlsec.tar.gz
 
 ## install psycopg2
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install -I --no-binary "${BUILD_FROM_SRC}" /app/psycopg2.tar.gz ; \
-    rm /app/psycopg2.tar.gz
+      pip -v install --no-binary "${BUILD_FROM_SRC}" ./psycopg2.tar.gz ; \
+    rm psycopg2.tar.gz
 
-## install sentry "in-place"
-RUN tar -xf /app/sentry.tar.gz ; \
-    rm /app/sentry.tar.gz ; \
-    apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install --no-binary "${BUILD_FROM_SRC}" -e . ; \
-    python -m compileall -q . ; \
-    ## adjust permissions
-    chmod -R go-w /app ; \
+RUN apt-wrap-python -d "${BUILD_DEPS}" \
+      pip -v install --no-binary "${BUILD_FROM_SRC}" -r /tmp/sentry/requirements-base.txt ; \
+    cleanup ; \
     # monkey patch python-memcached
     sed -i \
       -e "s/if key is ''/if key == ''/" \
@@ -364,7 +362,7 @@ RUN tar -xf /app/sentry.tar.gz ; \
     python -c 'import maxminddb.extension; maxminddb.extension.Reader'
 
 RUN apt-list-installed > apt.deps.1 ; \
-    cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka | sort -uV > apt.deps ; \
+    cat apt.deps.uwsgi apt.deps.librdkafka | sort -uV > apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
@@ -377,13 +375,56 @@ RUN quiet apt-install binutils ; \
     xvp ls -lrS /tmp/elves ; \
     cleanup
 
-# smoke/qa
-RUN set -xv ; \
+## ---
+
+FROM ${IMAGE_PATH}/${STAGE_IMAGE} as sentry-aldente
+SHELL [ "/bin/sh", "-ec" ]
+
+ARG SENTRY_DEPS_INTERIM_IMAGE
+ARG SENTRY_RELEASE
+
+ENV SENTRY_BUILD=krd.1
+ENV SENTRY_WHEEL="/run/artifacts/sentry-${SENTRY_RELEASE}-py311-none-any.whl"
+
+## copy uwsgi and dependencies
+COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /app/              /app/
+COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
+COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
+
+COPY --from=sentry-prepare  /app/sentry.tar.gz  /app/
+
+WORKDIR /app
+
+## install sentry as wheel
+RUN xargs -r -a apt.deps apt-install ; \
+    ldconfig ; \
+    tar -xf sentry.tar.gz ; \
+    if ! [ -s "${SENTRY_WHEEL}" ] ; then \
+        mkdir -p /tmp/sentry-build ; \
+        cd /tmp/sentry-build ; \
+        tar -xf /app/sentry.tar.gz ; \
+        apt-wrap 'yarnpkg' \
+          sh -ec '\
+            command -V yarn >/dev/null || which yarnpkg | while read -r n ; do ln -sv $n ${n%/*}/yarn ; done ; \
+            python setup.py bdist_wheel' ; \
+        find dist/ -name '*.whl' -type f -exec cp -nvt /run/artifacts {} + ; \
+        cd /app ; \
+        cleanup ; \
+        ## cleanup after yarn
+        rm -rf /usr/local/share/.cache ; \
+    fi ; \
+    rm sentry.tar.gz ; \
+    rm apt.deps.* || : ; \
+    pip -v install --no-deps "${SENTRY_WHEEL}" ; \
+    # recompile python cache
+    python -m compileall -q ${SITE_PACKAGES} ; \
+    ## smoke/qa
+    set -xv ; \
     sentry --version
 
 ## ---
 
-FROM ${BUILDER_INTERIM_IMAGE} as snuba-aldente
+FROM ${BUILDER_INTERIM_IMAGE} as snuba-deps
 SHELL [ "/bin/sh", "-ec" ]
 
 ENV BUILD_DEPS='libcurl4-openssl-dev libffi-dev liblz4-dev libpcre3-dev libsasl2-dev libssl-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
@@ -402,26 +443,21 @@ COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-COPY --from=snuba-prepare  /app/snuba.tar.gz  /app/
+COPY /snuba/  /tmp/snuba/
 
 WORKDIR /app
 
-RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
+RUN cat apt.deps.uwsgi apt.deps.librdkafka \
     | sort -uV | xargs -r apt-install ; \
+    ldconfig ; \
     apt-list-installed > apt.deps.0
 
-## install snuba "in-place"
-RUN tar -xf /app/snuba.tar.gz ; \
-    rm /app/snuba.tar.gz ; \
-    apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install --no-binary "${BUILD_FROM_SRC}" -e . ; \
-    cleanup ; \
-    python -m compileall -q . ; \
-    ## adjust permissions
-    chmod -R go-w /app
+RUN apt-wrap-python -d "${BUILD_DEPS}" \
+      pip -v install --no-binary "${BUILD_FROM_SRC}" -r /tmp/snuba/requirements.txt ; \
+    cleanup
 
 RUN apt-list-installed > apt.deps.1 ; \
-    cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka | sort -uV > apt.deps ; \
+    cat apt.deps.uwsgi apt.deps.librdkafka | sort -uV > apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
     rm -f apt.deps.0 apt.deps.1
@@ -434,8 +470,35 @@ RUN quiet apt-install binutils ; \
     xvp ls -lrS /tmp/elves ; \
     cleanup
 
-# smoke/qa
-RUN set -xv ; \
+## ---
+
+FROM ${IMAGE_PATH}/${STAGE_IMAGE} as snuba-aldente
+SHELL [ "/bin/sh", "-ec" ]
+
+ARG SNUBA_DEPS_INTERIM_IMAGE
+
+## copy uwsgi and dependencies
+COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /app/              /app/
+COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
+COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
+
+COPY --from=snuba-prepare  /app/snuba.tar.gz  /app/
+
+WORKDIR /app
+
+## install snuba "in-place"
+RUN xargs -r -a apt.deps apt-install ; \
+    ldconfig ; \
+    tar -xf snuba.tar.gz ; \
+    rm snuba.tar.gz ; \
+    rm apt.deps.* || : ; \
+    pip -v install --no-deps -e . ; \
+    cleanup ; \
+    python -m compileall -q . ; \
+    ## adjust permissions
+    chmod -R go-w /app ; \
+    ## smoke/qa
+    set -xv ; \
     snuba --version
 
 ## ---
@@ -454,6 +517,7 @@ COPY --from=sentry-aldente  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=sentry-aldente  /usr/local/        /usr/local/
 
 RUN xargs -r -a /app/apt.deps apt-install ; \
+    ldconfig ; \
     install -d -m 01777 /data ; \
     cleanup
 
@@ -491,6 +555,7 @@ COPY --from=snuba-aldente  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=snuba-aldente  /usr/local/        /usr/local/
 
 RUN xargs -r -a /app/apt.deps apt-install ; \
+    ldconfig ; \
     cleanup
 
 ARG SENTRY_RELEASE

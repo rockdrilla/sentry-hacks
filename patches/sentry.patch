@@ -15,6 +15,17 @@
  }
  
  setup-git-config() {
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -21,7 +21,7 @@ extension =
+     S=tools.flake8_plugin:SentryCheck
+ 
+ [bdist_wheel]
+-python-tag = py38
++python-tag = py311
+ 
+ [coverage:run]
+ omit =
 --- a/setup.py
 +++ b/setup.py
 @@ -87,7 +87,7 @@ def get_requirements(env):
@@ -26,6 +37,15 @@
  if not sys.argv[1:][0].startswith("bdist"):
      extras_require["dev"] = get_requirements("dev")
  
+@@ -161,7 +161,7 @@ setup(
+         "Intended Audience :: System Administrators",
+         "Operating System :: POSIX :: Linux",
+         "Programming Language :: Python :: 3",
+-        "Programming Language :: Python :: 3.8",
++        "Programming Language :: Python :: 3.11",
+         "Topic :: Software Development",
+         "License :: Other/Proprietary License",
+     ],
 --- a/src/sentry/testutils/helpers/query.py
 +++ b/src/sentry/testutils/helpers/query.py
 @@ -12,14 +12,15 @@ def parse_queries(captured_queries):
@@ -71,3 +91,14 @@
      def decode(self, value: bytes) -> bytes:
 -        return cast(bytes, zstandard.ZstdDecompressor().decompress(value))
 +        return zstandard.ZstdDecompressor().decompress(value)
+--- a/src/sentry/utils/distutils/commands/base.py
++++ b/src/sentry/utils/distutils/commands/base.py
+@@ -122,7 +122,7 @@ class BaseBuildCommand(Command):
+ 
+         if node_version[2] is not None:
+             log.info(f"using node ({node_version})")
+-            self._run_command(["yarn", "install", "--production", "--frozen-lockfile", "--quiet"])
++            self._run_command(["yarn", "install", "--production", "--frozen-lockfile"])
+ 
+     def _run_command(self, cmd, env=None):
+         cmd_str = " ".join(cmd)
