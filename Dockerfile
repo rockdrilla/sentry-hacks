@@ -3,6 +3,7 @@ ARG DISTRO
 ARG SUITE
 ARG PYTHON_VERSION
 
+ARG BUILDER_INTERIM_IMAGE
 ARG UWSGI_INTERIM_IMAGE
 ARG HELPER_IMAGE=${DISTRO}-buildd:${SUITE}
 ARG STAGE_IMAGE=python-dev:${PYTHON_VERSION}-${SUITE}
@@ -85,6 +86,46 @@ RUN mkdir /tmp/uwsgi ; \
     ls -l /run/artifacts/uwsgi-${UWSGI_GITREF}.tar.gz /app/uwsgi.tar.gz ; \
     cd / ; \
     cleanup
+
+## ---
+
+FROM ${IMAGE_PATH}/${STAGE_IMAGE} as builder
+
+ENV DEB_BUILD_OPTIONS='hardening=+all,-pie,-stackprotectorstrong optimize=-lto' \
+    _CFLAGS_STRIP='-g -O2' \
+    _CFLAGS_PREPEND='-g -O3 -fPIC -flto=2 -fuse-linker-plugin -ffat-lto-objects -flto-partition=none'
+
+ENV DEB_CFLAGS_STRIP="${_CFLAGS_STRIP}" \
+    DEB_CXXFLAGS_STRIP="${_CFLAGS_STRIP}" \
+    DEB_CFLAGS_PREPEND="${_CFLAGS_PREPEND}" \
+    DEB_CFLAGS_PREPEND="${_CFLAGS_PREPEND}"
+
+# hack the python!
+
+RUN grep -ZFRl -e fstack-protector-strong $(python-config --prefix)/ \
+    | xargs -0r sed -i -e 's/fstack-protector-strong/fstack-protector/g'
+
+RUN grep -ZFRl -e fno-lto $(python-config --prefix)/ \
+    | xargs -0r sed -Ei -e 's/\s*-fno-lto\s*//g'
+
+RUN cd / ; \
+    apt-wrap 'gcc dpkg-dev' \
+      sh -ec 'dpkg-buildflags --export=sh > /opt/flags' ; \
+    . /opt/flags ; \
+    for f in ${CFLAGS} ; do \
+        case "$f" in \
+        -specs=* ) \
+            _CFLAGS_PREPEND="${_CFLAGS_PREPEND} $f" ; \
+        ;; \
+        esac ; \
+    done ; \
+    grep -ZFRl -e ' -O2 ' $(python-config --prefix)/ \
+    | xargs -0r sed -i -e "s#-g -O2 #${_CFLAGS_PREPEND} #g"
+
+## finish layer
+RUN cleanup ; \
+    ## smoke/qa
+    python-config --cflags
 
 ## ---
 
