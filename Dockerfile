@@ -113,6 +113,52 @@ RUN mkdir /tmp/sentry-arroyo ; \
 
 ## ---
 
+FROM ${IMAGE_PATH}/${HELPER_IMAGE} as xmlsec-prepare
+SHELL [ "/bin/sh", "-ec" ]
+
+ARG PYTHON_XMLSEC_GITREF
+
+COPY /patches/python-xmlsec.patch  /app/
+
+## repack python-xmlsec tarball
+RUN mkdir /tmp/python-xmlsec ; \
+    cd /tmp/python-xmlsec ; \
+    tar --strip-components=1 -xf /run/artifacts/python-xmlsec-${PYTHON_XMLSEC_GITREF}.tar.gz ; \
+    ## apply patch
+    patch -p1 < /app/python-xmlsec.patch ; \
+    ## save tarball
+    tar -cf - . | gzip -9 > /app/python-xmlsec.tar.gz ; \
+    ls -l /run/artifacts/python-xmlsec-${PYTHON_XMLSEC_GITREF}.tar.gz /app/python-xmlsec.tar.gz ; \
+    cd / ; \
+    cleanup
+
+## ---
+
+FROM ${IMAGE_PATH}/${HELPER_IMAGE} as psycopg2-prepare
+SHELL [ "/bin/sh", "-ec" ]
+
+ARG PSYCOPG2_GITREF
+
+COPY /patches/psycopg2.patch  /app/
+
+## repack psycopg2 tarball
+RUN mkdir /tmp/psycopg2 ; \
+    cd /tmp/psycopg2 ; \
+    tar --strip-components=1 -xf /run/artifacts/psycopg2-${PSYCOPG2_GITREF}.tar.gz ; \
+    ## remove unused things
+    rm -rf tests ; \
+    ## apply patch
+    patch -p1 < /app/psycopg2.patch ; \
+    rm lib/_lru_cache.py lib/compat.py psycopg/adapter_mxdatetime.c \
+       psycopg/adapter_mxdatetime.h psycopg/typecast_mxdatetime.c ; \
+    ## save tarball
+    tar -cf - . | gzip -9 > /app/psycopg2.tar.gz ; \
+    ls -l /run/artifacts/psycopg2-${PSYCOPG2_GITREF}.tar.gz /app/psycopg2.tar.gz ; \
+    cd / ; \
+    cleanup
+
+## ---
+
 FROM ${IMAGE_PATH}/${STAGE_IMAGE} as builder
 
 ENV DEB_BUILD_OPTIONS='hardening=+all,-pie,-stackprotectorstrong optimize=-lto' \
@@ -263,7 +309,8 @@ FROM ${BUILDER_INTERIM_IMAGE} as sentry-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
 ENV SENTRY_LIGHT_BUILD=1
-ENV SENTRY_BUILD_DEPS='libffi-dev libjpeg-dev libmaxminddb-dev libpq-dev libxmlsec1-dev libxmlsec1-dev libxslt-dev libyaml-dev'
+ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
+ENV BUILD_FROM_SRC='cffi,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,python-rapidjson,pyyaml,regex,simplejson,zstandard'
 
 ARG UWSGI_INTERIM_IMAGE
 ARG LIBRDKAFKA_INTERIM_IMAGE
@@ -278,7 +325,9 @@ COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-COPY --from=sentry-prepare  /app/sentry.tar.gz  /app/
+COPY --from=sentry-prepare    /app/sentry.tar.gz         /app/
+COPY --from=xmlsec-prepare    /app/python-xmlsec.tar.gz  /app/
+COPY --from=psycopg2-prepare  /app/psycopg2.tar.gz       /app/
 
 WORKDIR /app
 
@@ -286,15 +335,31 @@ RUN cat /app/apt.deps.uwsgi /app/apt.deps.librdkafka \
     | sort -uV | xargs -r apt-install ; \
     apt-list-installed > apt.deps.0
 
+## install python-xmlsec
+RUN apt-wrap-python -d "${BUILD_DEPS}" \
+      pip -v install -I --no-binary "${BUILD_FROM_SRC}" /app/python-xmlsec.tar.gz ; \
+    rm /app/python-xmlsec.tar.gz
+
+## install psycopg2
+RUN apt-wrap-python -d "${BUILD_DEPS}" \
+      pip -v install -I --no-binary "${BUILD_FROM_SRC}" /app/psycopg2.tar.gz ; \
+    rm /app/psycopg2.tar.gz
+
 ## install sentry "in-place"
 RUN tar -xf /app/sentry.tar.gz ; \
     rm /app/sentry.tar.gz ; \
-    apt-wrap-python -d "${SENTRY_BUILD_DEPS}" \
-      pip -v install -e . ; \
-    cleanup ; \
+    apt-wrap-python -d "${BUILD_DEPS}" \
+      pip -v install --no-binary "${BUILD_FROM_SRC}" -e . ; \
     python -m compileall -q . ; \
     ## adjust permissions
     chmod -R go-w /app ; \
+    # monkey patch python-memcached
+    sed -i \
+      -e "s/if key is ''/if key == ''/" \
+      -e "s/if key_extra_len is 0/if key_extra_len == 0/" \
+    ${SITE_PACKAGES}/memcache.py ; \
+    # recompile python cache
+    python -m compileall -q ${SITE_PACKAGES} ; \
     # smoke/qa
     python -c 'import maxminddb.extension; maxminddb.extension.Reader'
 

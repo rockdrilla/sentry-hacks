@@ -1,0 +1,2561 @@
+--- a/lib/__init__.py
++++ b/lib/__init__.py
+@@ -61,8 +61,6 @@ from psycopg2._psycopg import (                     # noqa
+     __version__, __libpq_version__,
+ )
+ 
+-from psycopg2 import tz                             # noqa
+-
+ 
+ # Register default adapters.
+ 
+--- a/lib/_ipaddress.py
++++ b/lib/_ipaddress.py
+@@ -26,7 +26,6 @@
+ 
+ from psycopg2.extensions import (
+     new_type, new_array_type, register_type, register_adapter, QuotedString)
+-from psycopg2.compat import text_type
+ 
+ # The module is imported on register_ipaddress
+ ipaddress = None
+@@ -78,13 +77,13 @@ def cast_interface(s, cur=None):
+     if s is None:
+         return None
+     # Py2 version force the use of unicode. meh.
+-    return ipaddress.ip_interface(text_type(s))
++    return ipaddress.ip_interface(str(s))
+ 
+ 
+ def cast_network(s, cur=None):
+     if s is None:
+         return None
+-    return ipaddress.ip_network(text_type(s))
++    return ipaddress.ip_network(str(s))
+ 
+ 
+ def adapt_ipaddress(obj):
+--- a/lib/_json.py
++++ b/lib/_json.py
+@@ -32,7 +32,6 @@ import json
+ 
+ from psycopg2._psycopg import ISQLQuote, QuotedString
+ from psycopg2._psycopg import new_type, new_array_type, register_type
+-from psycopg2.compat import PY2
+ 
+ 
+ # oids from PostgreSQL 9.2
+@@ -44,7 +43,7 @@ JSONB_OID = 3802
+ JSONBARRAY_OID = 3807
+ 
+ 
+-class Json(object):
++class Json:
+     """
+     An `~psycopg2.extensions.ISQLQuote` wrapper to adapt a Python object to
+     :sql:`json` data type.
+@@ -82,13 +81,9 @@ class Json(object):
+             qs.prepare(self._conn)
+         return qs.getquoted()
+ 
+-    if PY2:
+-        def __str__(self):
+-            return self.getquoted()
+-    else:
+-        def __str__(self):
+-            # getquoted is binary in Py3
+-            return self.getquoted().decode('ascii', 'replace')
++    def __str__(self):
++        # getquoted is binary
++        return self.getquoted().decode('ascii', 'replace')
+ 
+ 
+ def register_json(conn_or_curs=None, globally=False, loads=None,
+@@ -168,7 +163,7 @@ def _create_json_typecasters(oid, array_oid, loads=None, name='JSON'):
+ 
+     JSON = new_type((oid, ), name, typecast_json)
+     if array_oid is not None:
+-        JSONARRAY = new_array_type((array_oid, ), "%sARRAY" % name, JSON)
++        JSONARRAY = new_array_type((array_oid, ), f"{name}ARRAY", JSON)
+     else:
+         JSONARRAY = None
+ 
+@@ -199,6 +194,6 @@ def _get_json_oids(conn_or_curs, name='json'):
+         conn.rollback()
+ 
+     if not r:
+-        raise conn.ProgrammingError("%s data type not found" % name)
++        raise conn.ProgrammingError(f"{name} data type not found")
+ 
+     return r
+--- a/lib/_range.py
++++ b/lib/_range.py
+@@ -30,10 +30,9 @@ import re
+ from psycopg2._psycopg import ProgrammingError, InterfaceError
+ from psycopg2.extensions import ISQLQuote, adapt, register_adapter
+ from psycopg2.extensions import new_type, new_array_type, register_type
+-from psycopg2.compat import string_types
+ 
+ 
+-class Range(object):
++class Range:
+     """Python representation for a PostgreSQL |range|_ type.
+ 
+     :param lower: lower bound for the range. `!None` means unbound
+@@ -48,7 +47,7 @@ class Range(object):
+     def __init__(self, lower=None, upper=None, bounds='[)', empty=False):
+         if not empty:
+             if bounds not in ('[)', '(]', '()', '[]'):
+-                raise ValueError("bound flags not valid: %r" % bounds)
++                raise ValueError(f"bound flags not valid: {bounds!r}")
+ 
+             self._lower = lower
+             self._upper = upper
+@@ -58,9 +57,9 @@ class Range(object):
+ 
+     def __repr__(self):
+         if self._bounds is None:
+-            return "%s(empty=True)" % self.__class__.__name__
++            return f"{self.__class__.__name__}(empty=True)"
+         else:
+-            return "%s(%r, %r, %r)" % (self.__class__.__name__,
++            return "{}({!r}, {!r}, {!r})".format(self.__class__.__name__,
+                 self._lower, self._upper, self._bounds)
+ 
+     def __str__(self):
+@@ -144,10 +143,6 @@ class Range(object):
+     def __bool__(self):
+         return self._bounds is not None
+ 
+-    def __nonzero__(self):
+-        # Python 2 compatibility
+-        return type(self).__bool__(self)
+-
+     def __eq__(self, other):
+         if not isinstance(other, Range):
+             return False
+@@ -239,7 +234,7 @@ def register_range(pgrange, pyrange, conn_or_curs, globally=False):
+     return caster
+ 
+ 
+-class RangeAdapter(object):
++class RangeAdapter:
+     """`ISQLQuote` adapter for `Range` subclasses.
+ 
+     This is an abstract class: concrete classes must set a `name` class
+@@ -287,7 +282,7 @@ class RangeAdapter(object):
+             + b", '" + r._bounds.encode('utf8') + b"')"
+ 
+ 
+-class RangeCaster(object):
++class RangeCaster:
+     """Helper class to convert between `Range` and PostgreSQL range types.
+ 
+     Objects of this class are usually created by `register_range()`. Manual
+@@ -315,7 +310,7 @@ class RangeCaster(object):
+         # an implementation detail and is not documented. It is currently used
+         # for the numeric ranges.
+         self.adapter = None
+-        if isinstance(pgrange, string_types):
++        if isinstance(pgrange, str):
+             self.adapter = type(pgrange, (RangeAdapter,), {})
+             self.adapter.name = pgrange
+         else:
+@@ -332,7 +327,7 @@ class RangeCaster(object):
+ 
+         self.range = None
+         try:
+-            if isinstance(pyrange, string_types):
++            if isinstance(pyrange, str):
+                 self.range = type(pyrange, (Range,), {})
+             if issubclass(pyrange, Range) and pyrange is not Range:
+                 self.range = pyrange
+@@ -368,33 +363,54 @@ class RangeCaster(object):
+             schema = 'public'
+ 
+         # get the type oid and attributes
+-        try:
+-            curs.execute("""\
+-select rngtypid, rngsubtype,
+-    (select typarray from pg_type where oid = rngtypid)
++        curs.execute("""\
++select rngtypid, rngsubtype, typarray
+ from pg_range r
+ join pg_type t on t.oid = rngtypid
+ join pg_namespace ns on ns.oid = typnamespace
+ where typname = %s and ns.nspname = %s;
+ """, (tname, schema))
++        rec = curs.fetchone()
+ 
+-        except ProgrammingError:
+-            if not conn.autocommit:
+-                conn.rollback()
+-            raise
+-        else:
+-            rec = curs.fetchone()
++        if not rec:
++            # The above algorithm doesn't work for customized seach_path
++            # (#1487) The implementation below works better, but, to guarantee
++            # backwards compatibility, use it only if the original one failed.
++            try:
++                savepoint = False
++                # Because we executed statements earlier, we are either INTRANS
++                # or we are IDLE only if the transaction is autocommit, in
++                # which case we don't need the savepoint anyway.
++                if conn.status == STATUS_IN_TRANSACTION:
++                    curs.execute("SAVEPOINT register_type")
++                    savepoint = True
++
++                curs.execute("""\
++SELECT rngtypid, rngsubtype, typarray, typname, nspname
++from pg_range r
++join pg_type t on t.oid = rngtypid
++join pg_namespace ns on ns.oid = typnamespace
++WHERE t.oid = %s::regtype
++""", (name, ))
++            except ProgrammingError:
++                pass
++            else:
++                rec = curs.fetchone()
++                if rec:
++                    tname, schema = rec[3:]
++            finally:
++                if savepoint:
++                    curs.execute("ROLLBACK TO SAVEPOINT register_type")
+ 
+-            # revert the status of the connection as before the command
+-            if (conn_status != STATUS_IN_TRANSACTION
+-            and not conn.autocommit):
+-                conn.rollback()
++        # revert the status of the connection as before the command
++        if conn_status != STATUS_IN_TRANSACTION and not conn.autocommit:
++            conn.rollback()
+ 
+         if not rec:
+             raise ProgrammingError(
+-                "PostgreSQL type '%s' not found" % name)
++                f"PostgreSQL range '{name}' not found")
+ 
+-        type, subtype, array = rec
++        type, subtype, array = rec[:3]
+ 
+         return RangeCaster(name, pyrange,
+             oid=type, subtype_oid=subtype, array_oid=array)
+@@ -424,7 +440,7 @@ where typname = %s and ns.nspname = %s;
+ 
+         m = self._re_range.match(s)
+         if m is None:
+-            raise InterfaceError("failed to parse range: '%s'" % s)
++            raise InterfaceError(f"failed to parse range: '{s}'")
+ 
+         lower = m.group(3)
+         if lower is None:
+@@ -504,8 +520,7 @@ class NumberRangeAdapter(RangeAdapter):
+         else:
+             upper = ''
+ 
+-        return ("'%s%s,%s%s'" % (
+-            r._bounds[0], lower, upper, r._bounds[1])).encode('ascii')
++        return (f"'{r._bounds[0]}{lower},{upper}{r._bounds[1]}'").encode('ascii')
+ 
+ 
+ # TODO: probably won't work with infs, nans and other tricky cases.
+--- a/lib/errorcodes.py
++++ b/lib/errorcodes.py
+@@ -223,6 +223,7 @@ SQL_JSON_OBJECT_NOT_FOUND = '2203C'
+ TOO_MANY_JSON_ARRAY_ELEMENTS = '2203D'
+ TOO_MANY_JSON_OBJECT_MEMBERS = '2203E'
+ SQL_JSON_SCALAR_REQUIRED = '2203F'
++SQL_JSON_ITEM_CANNOT_BE_CAST_TO_TARGET_TYPE = '2203G'
+ FLOATING_POINT_EXCEPTION = '22P01'
+ INVALID_TEXT_REPRESENTATION = '22P02'
+ INVALID_BINARY_REPRESENTATION = '22P03'
+@@ -391,6 +392,7 @@ ADMIN_SHUTDOWN = '57P01'
+ CRASH_SHUTDOWN = '57P02'
+ CANNOT_CONNECT_NOW = '57P03'
+ DATABASE_DROPPED = '57P04'
++IDLE_SESSION_TIMEOUT = '57P05'
+ 
+ # Class 58 - System Error (errors external to PostgreSQL itself)
+ SYSTEM_ERROR = '58000'
+--- a/lib/extensions.py
++++ b/lib/extensions.py
+@@ -42,14 +42,6 @@ from psycopg2._psycopg import (                             # noqa
+     ROWIDARRAY, STRINGARRAY, TIME, TIMEARRAY, UNICODE, UNICODEARRAY,
+     AsIs, Binary, Boolean, Float, Int, QuotedString, )
+ 
+-try:
+-    from psycopg2._psycopg import (                         # noqa
+-        MXDATE, MXDATETIME, MXDATETIMETZ, MXINTERVAL, MXTIME, MXDATEARRAY,
+-        MXDATETIMEARRAY, MXDATETIMETZARRAY, MXINTERVALARRAY, MXTIMEARRAY,
+-        DateFromMx, TimeFromMx, TimestampFromMx, IntervalFromMx, )
+-except ImportError:
+-    pass
+-
+ from psycopg2._psycopg import (                         # noqa
+     PYDATE, PYDATETIME, PYDATETIMETZ, PYINTERVAL, PYTIME, PYDATEARRAY,
+     PYDATETIMEARRAY, PYDATETIMETZARRAY, PYINTERVALARRAY, PYTIMEARRAY,
+@@ -106,7 +98,7 @@ def register_adapter(typ, callable):
+ 
+ 
+ # The SQL_IN class is the official adapter for tuples starting from 2.0.6.
+-class SQL_IN(object):
++class SQL_IN:
+     """Adapt any iterable to an SQL quotable object."""
+     def __init__(self, seq):
+         self._seq = seq
+@@ -130,7 +122,7 @@ class SQL_IN(object):
+         return str(self.getquoted())
+ 
+ 
+-class NoneAdapter(object):
++class NoneAdapter:
+     """Adapt None to NULL.
+ 
+     This adapter is not used normally as a fast path in mogrify uses NULL,
+@@ -168,7 +160,7 @@ def make_dsn(dsn=None, **kwargs):
+         tmp.update(kwargs)
+         kwargs = tmp
+ 
+-    dsn = " ".join(["%s=%s" % (k, _param_escape(str(v)))
++    dsn = " ".join(["{}={}".format(k, _param_escape(str(v)))
+         for (k, v) in kwargs.items()])
+ 
+     # verify that the returned dsn is valid
+--- a/lib/extras.py
++++ b/lib/extras.py
+@@ -38,7 +38,7 @@ from psycopg2 import extensions as _ext
+ from .extensions import cursor as _cursor
+ from .extensions import connection as _connection
+ from .extensions import adapt as _A, quote_ident
+-from .compat import PY2, PY3, lru_cache
++from functools import lru_cache
+ 
+ from psycopg2._psycopg import (                             # noqa
+     REPLICATION_PHYSICAL, REPLICATION_LOGICAL,
+@@ -72,47 +72,47 @@ class DictCursorBase(_cursor):
+         else:
+             raise NotImplementedError(
+                 "DictCursorBase can't be instantiated without a row factory.")
+-        super(DictCursorBase, self).__init__(*args, **kwargs)
++        super().__init__(*args, **kwargs)
+         self._query_executed = False
+         self._prefetch = False
+         self.row_factory = row_factory
+ 
+     def fetchone(self):
+         if self._prefetch:
+-            res = super(DictCursorBase, self).fetchone()
++            res = super().fetchone()
+         if self._query_executed:
+             self._build_index()
+         if not self._prefetch:
+-            res = super(DictCursorBase, self).fetchone()
++            res = super().fetchone()
+         return res
+ 
+     def fetchmany(self, size=None):
+         if self._prefetch:
+-            res = super(DictCursorBase, self).fetchmany(size)
++            res = super().fetchmany(size)
+         if self._query_executed:
+             self._build_index()
+         if not self._prefetch:
+-            res = super(DictCursorBase, self).fetchmany(size)
++            res = super().fetchmany(size)
+         return res
+ 
+     def fetchall(self):
+         if self._prefetch:
+-            res = super(DictCursorBase, self).fetchall()
++            res = super().fetchall()
+         if self._query_executed:
+             self._build_index()
+         if not self._prefetch:
+-            res = super(DictCursorBase, self).fetchall()
++            res = super().fetchall()
+         return res
+ 
+     def __iter__(self):
+         try:
+             if self._prefetch:
+-                res = super(DictCursorBase, self).__iter__()
++                res = super().__iter__()
+                 first = next(res)
+             if self._query_executed:
+                 self._build_index()
+             if not self._prefetch:
+-                res = super(DictCursorBase, self).__iter__()
++                res = super().__iter__()
+                 first = next(res)
+ 
+             yield first
+@@ -126,7 +126,7 @@ class DictConnection(_connection):
+     """A connection that uses `DictCursor` automatically."""
+     def cursor(self, *args, **kwargs):
+         kwargs.setdefault('cursor_factory', self.cursor_factory or DictCursor)
+-        return super(DictConnection, self).cursor(*args, **kwargs)
++        return super().cursor(*args, **kwargs)
+ 
+ 
+ class DictCursor(DictCursorBase):
+@@ -137,18 +137,18 @@ class DictCursor(DictCursorBase):
+ 
+     def __init__(self, *args, **kwargs):
+         kwargs['row_factory'] = DictRow
+-        super(DictCursor, self).__init__(*args, **kwargs)
++        super().__init__(*args, **kwargs)
+         self._prefetch = True
+ 
+     def execute(self, query, vars=None):
+         self.index = OrderedDict()
+         self._query_executed = True
+-        return super(DictCursor, self).execute(query, vars)
++        return super().execute(query, vars)
+ 
+     def callproc(self, procname, vars=None):
+         self.index = OrderedDict()
+         self._query_executed = True
+-        return super(DictCursor, self).callproc(procname, vars)
++        return super().callproc(procname, vars)
+ 
+     def _build_index(self):
+         if self._query_executed and self.description:
+@@ -169,22 +169,22 @@ class DictRow(list):
+     def __getitem__(self, x):
+         if not isinstance(x, (int, slice)):
+             x = self._index[x]
+-        return super(DictRow, self).__getitem__(x)
++        return super().__getitem__(x)
+ 
+     def __setitem__(self, x, v):
+         if not isinstance(x, (int, slice)):
+             x = self._index[x]
+-        super(DictRow, self).__setitem__(x, v)
++        super().__setitem__(x, v)
+ 
+     def items(self):
+-        g = super(DictRow, self).__getitem__
++        g = super().__getitem__
+         return ((n, g(self._index[n])) for n in self._index)
+ 
+     def keys(self):
+         return iter(self._index)
+ 
+     def values(self):
+-        g = super(DictRow, self).__getitem__
++        g = super().__getitem__
+         return (g(self._index[n]) for n in self._index)
+ 
+     def get(self, x, default=None):
+@@ -201,7 +201,7 @@ class DictRow(list):
+ 
+     def __reduce__(self):
+         # this is apparently useless, but it fixes #1073
+-        return super(DictRow, self).__reduce__()
++        return super().__reduce__()
+ 
+     def __getstate__(self):
+         return self[:], self._index.copy()
+@@ -210,27 +210,12 @@ class DictRow(list):
+         self[:] = data[0]
+         self._index = data[1]
+ 
+-    if PY2:
+-        iterkeys = keys
+-        itervalues = values
+-        iteritems = items
+-        has_key = __contains__
+-
+-        def keys(self):
+-            return list(self.iterkeys())
+-
+-        def values(self):
+-            return tuple(self.itervalues())
+-
+-        def items(self):
+-            return list(self.iteritems())
+-
+ 
+ class RealDictConnection(_connection):
+     """A connection that uses `RealDictCursor` automatically."""
+     def cursor(self, *args, **kwargs):
+         kwargs.setdefault('cursor_factory', self.cursor_factory or RealDictCursor)
+-        return super(RealDictConnection, self).cursor(*args, **kwargs)
++        return super().cursor(*args, **kwargs)
+ 
+ 
+ class RealDictCursor(DictCursorBase):
+@@ -243,17 +228,17 @@ class RealDictCursor(DictCursorBase):
+     """
+     def __init__(self, *args, **kwargs):
+         kwargs['row_factory'] = RealDictRow
+-        super(RealDictCursor, self).__init__(*args, **kwargs)
++        super().__init__(*args, **kwargs)
+ 
+     def execute(self, query, vars=None):
+         self.column_mapping = []
+         self._query_executed = True
+-        return super(RealDictCursor, self).execute(query, vars)
++        return super().execute(query, vars)
+ 
+     def callproc(self, procname, vars=None):
+         self.column_mapping = []
+         self._query_executed = True
+-        return super(RealDictCursor, self).callproc(procname, vars)
++        return super().callproc(procname, vars)
+ 
+     def _build_index(self):
+         if self._query_executed and self.description:
+@@ -271,7 +256,7 @@ class RealDictRow(OrderedDict):
+         else:
+             cursor = None
+ 
+-        super(RealDictRow, self).__init__(*args, **kwargs)
++        super().__init__(*args, **kwargs)
+ 
+         if cursor is not None:
+             # Required for named cursors
+@@ -287,20 +272,20 @@ class RealDictRow(OrderedDict):
+         if RealDictRow in self:
+             # We are in the row building phase
+             mapping = self[RealDictRow]
+-            super(RealDictRow, self).__setitem__(mapping[key], value)
++            super().__setitem__(mapping[key], value)
+             if key == len(mapping) - 1:
+                 # Row building finished
+                 del self[RealDictRow]
+             return
+ 
+-        super(RealDictRow, self).__setitem__(key, value)
++        super().__setitem__(key, value)
+ 
+ 
+ class NamedTupleConnection(_connection):
+     """A connection that uses `NamedTupleCursor` automatically."""
+     def cursor(self, *args, **kwargs):
+         kwargs.setdefault('cursor_factory', self.cursor_factory or NamedTupleCursor)
+-        return super(NamedTupleConnection, self).cursor(*args, **kwargs)
++        return super().cursor(*args, **kwargs)
+ 
+ 
+ class NamedTupleCursor(_cursor):
+@@ -324,18 +309,18 @@ class NamedTupleCursor(_cursor):
+ 
+     def execute(self, query, vars=None):
+         self.Record = None
+-        return super(NamedTupleCursor, self).execute(query, vars)
++        return super().execute(query, vars)
+ 
+     def executemany(self, query, vars):
+         self.Record = None
+-        return super(NamedTupleCursor, self).executemany(query, vars)
++        return super().executemany(query, vars)
+ 
+     def callproc(self, procname, vars=None):
+         self.Record = None
+-        return super(NamedTupleCursor, self).callproc(procname, vars)
++        return super().callproc(procname, vars)
+ 
+     def fetchone(self):
+-        t = super(NamedTupleCursor, self).fetchone()
++        t = super().fetchone()
+         if t is not None:
+             nt = self.Record
+             if nt is None:
+@@ -343,14 +328,14 @@ class NamedTupleCursor(_cursor):
+             return nt._make(t)
+ 
+     def fetchmany(self, size=None):
+-        ts = super(NamedTupleCursor, self).fetchmany(size)
++        ts = super().fetchmany(size)
+         nt = self.Record
+         if nt is None:
+             nt = self.Record = self._make_nt()
+         return list(map(nt._make, ts))
+ 
+     def fetchall(self):
+-        ts = super(NamedTupleCursor, self).fetchall()
++        ts = super().fetchall()
+         nt = self.Record
+         if nt is None:
+             nt = self.Record = self._make_nt()
+@@ -358,7 +343,7 @@ class NamedTupleCursor(_cursor):
+ 
+     def __iter__(self):
+         try:
+-            it = super(NamedTupleCursor, self).__iter__()
++            it = super().__iter__()
+             t = next(it)
+ 
+             nt = self.Record
+@@ -372,10 +357,6 @@ class NamedTupleCursor(_cursor):
+         except StopIteration:
+             return
+ 
+-    # ascii except alnum and underscore
+-    _re_clean = _re.compile(
+-        '[' + _re.escape(' !"#$%&\'()*+,-./:;<=>?@[\\]^`{|}~') + ']')
+-
+     def _make_nt(self):
+         key = tuple(d[0] for d in self.description) if self.description else ()
+         return self._cached_make_nt(key)
+@@ -384,7 +365,7 @@ class NamedTupleCursor(_cursor):
+     def _do_make_nt(cls, key):
+         fields = []
+         for s in key:
+-            s = cls._re_clean.sub('_', s)
++            s = _re_clean.sub('_', s)
+             # Python identifier cannot start with numbers, namedtuple fields
+             # cannot start with underscore. So...
+             if s[0] == '_' or '0' <= s[0] <= '9':
+@@ -436,7 +417,7 @@ class LoggingConnection(_connection):
+     def _logtofile(self, msg, curs):
+         msg = self.filter(msg, curs)
+         if msg:
+-            if PY3 and isinstance(msg, bytes):
++            if isinstance(msg, bytes):
+                 msg = msg.decode(_ext.encodings[self.encoding], 'replace')
+             self._logobj.write(msg + _os.linesep)
+ 
+@@ -453,7 +434,7 @@ class LoggingConnection(_connection):
+     def cursor(self, *args, **kwargs):
+         self._check()
+         kwargs.setdefault('cursor_factory', self.cursor_factory or LoggingCursor)
+-        return super(LoggingConnection, self).cursor(*args, **kwargs)
++        return super().cursor(*args, **kwargs)
+ 
+ 
+ class LoggingCursor(_cursor):
+@@ -461,13 +442,13 @@ class LoggingCursor(_cursor):
+ 
+     def execute(self, query, vars=None):
+         try:
+-            return super(LoggingCursor, self).execute(query, vars)
++            return super().execute(query, vars)
+         finally:
+             self.connection.log(self.query, self)
+ 
+     def callproc(self, procname, vars=None):
+         try:
+-            return super(LoggingCursor, self).callproc(procname, vars)
++            return super().callproc(procname, vars)
+         finally:
+             self.connection.log(self.query, self)
+ 
+@@ -490,9 +471,9 @@ class MinTimeLoggingConnection(LoggingConnection):
+     def filter(self, msg, curs):
+         t = (_time.time() - curs.timestamp) * 1000
+         if t > self._mintime:
+-            if PY3 and isinstance(msg, bytes):
++            if isinstance(msg, bytes):
+                 msg = msg.decode(_ext.encodings[self.encoding], 'replace')
+-            return msg + _os.linesep + "  (execution time: %d ms)" % t
++            return f"{msg}{_os.linesep}  (execution time: {t} ms)"
+ 
+     def cursor(self, *args, **kwargs):
+         kwargs.setdefault('cursor_factory',
+@@ -516,14 +497,14 @@ class LogicalReplicationConnection(_replicationConnection):
+ 
+     def __init__(self, *args, **kwargs):
+         kwargs['replication_type'] = REPLICATION_LOGICAL
+-        super(LogicalReplicationConnection, self).__init__(*args, **kwargs)
++        super().__init__(*args, **kwargs)
+ 
+ 
+ class PhysicalReplicationConnection(_replicationConnection):
+ 
+     def __init__(self, *args, **kwargs):
+         kwargs['replication_type'] = REPLICATION_PHYSICAL
+-        super(PhysicalReplicationConnection, self).__init__(*args, **kwargs)
++        super().__init__(*args, **kwargs)
+ 
+ 
+ class StopReplication(Exception):
+@@ -544,7 +525,7 @@ class ReplicationCursor(_replicationCursor):
+     def create_replication_slot(self, slot_name, slot_type=None, output_plugin=None):
+         """Create streaming replication slot."""
+ 
+-        command = "CREATE_REPLICATION_SLOT %s " % quote_ident(slot_name, self)
++        command = f"CREATE_REPLICATION_SLOT {quote_ident(slot_name, self)} "
+ 
+         if slot_type is None:
+             slot_type = self.connection.replication_type
+@@ -555,7 +536,7 @@ class ReplicationCursor(_replicationCursor):
+                     "output plugin name is required to create "
+                     "logical replication slot")
+ 
+-            command += "LOGICAL %s" % quote_ident(output_plugin, self)
++            command += f"LOGICAL {quote_ident(output_plugin, self)}"
+ 
+         elif slot_type == REPLICATION_PHYSICAL:
+             if output_plugin is not None:
+@@ -567,14 +548,14 @@ class ReplicationCursor(_replicationCursor):
+ 
+         else:
+             raise psycopg2.ProgrammingError(
+-                "unrecognized replication type: %s" % repr(slot_type))
++                f"unrecognized replication type: {repr(slot_type)}")
+ 
+         self.execute(command)
+ 
+     def drop_replication_slot(self, slot_name):
+         """Drop streaming replication slot."""
+ 
+-        command = "DROP_REPLICATION_SLOT %s" % quote_ident(slot_name, self)
++        command = f"DROP_REPLICATION_SLOT {quote_ident(slot_name, self)}"
+         self.execute(command)
+ 
+     def start_replication(
+@@ -589,7 +570,7 @@ class ReplicationCursor(_replicationCursor):
+ 
+         if slot_type == REPLICATION_LOGICAL:
+             if slot_name:
+-                command += "SLOT %s " % quote_ident(slot_name, self)
++                command += f"SLOT {quote_ident(slot_name, self)} "
+             else:
+                 raise psycopg2.ProgrammingError(
+                     "slot name is required for logical replication")
+@@ -598,19 +579,18 @@ class ReplicationCursor(_replicationCursor):
+ 
+         elif slot_type == REPLICATION_PHYSICAL:
+             if slot_name:
+-                command += "SLOT %s " % quote_ident(slot_name, self)
++                command += f"SLOT {quote_ident(slot_name, self)} "
+             # don't add "PHYSICAL", before 9.4 it was just START_REPLICATION XXX/XXX
+ 
+         else:
+             raise psycopg2.ProgrammingError(
+-                "unrecognized replication type: %s" % repr(slot_type))
++                f"unrecognized replication type: {repr(slot_type)}")
+ 
+         if type(start_lsn) is str:
+             lsn = start_lsn.split('/')
+-            lsn = "%X/%08X" % (int(lsn[0], 16), int(lsn[1], 16))
++            lsn = f"{int(lsn[0], 16):X}/{int(lsn[1], 16):08X}"
+         else:
+-            lsn = "%X/%08X" % ((start_lsn >> 32) & 0xFFFFFFFF,
+-                               start_lsn & 0xFFFFFFFF)
++            lsn = f"{start_lsn >> 32 & 4294967295:X}/{start_lsn & 4294967295:08X}"
+ 
+         command += lsn
+ 
+@@ -619,7 +599,7 @@ class ReplicationCursor(_replicationCursor):
+                 raise psycopg2.ProgrammingError(
+                     "cannot specify timeline for logical replication")
+ 
+-            command += " TIMELINE %d" % timeline
++            command += f" TIMELINE {timeline}"
+ 
+         if options:
+             if slot_type == REPLICATION_PHYSICAL:
+@@ -630,7 +610,7 @@ class ReplicationCursor(_replicationCursor):
+             for k, v in options.items():
+                 if not command.endswith('('):
+                     command += ", "
+-                command += "%s %s" % (quote_ident(k, self), _A(str(v)))
++                command += f"{quote_ident(k, self)} {_A(str(v))}"
+             command += ")"
+ 
+         self.start_replication_expert(
+@@ -643,7 +623,7 @@ class ReplicationCursor(_replicationCursor):
+ 
+ # a dbtype and adapter for Python UUID type
+ 
+-class UUID_adapter(object):
++class UUID_adapter:
+     """Adapt Python's uuid.UUID__ type to PostgreSQL's uuid__.
+ 
+     .. __: https://docs.python.org/library/uuid.html
+@@ -658,10 +638,10 @@ class UUID_adapter(object):
+             return self
+ 
+     def getquoted(self):
+-        return ("'%s'::uuid" % self._uuid).encode('utf8')
++        return (f"'{self._uuid}'::uuid").encode('utf8')
+ 
+     def __str__(self):
+-        return "'%s'::uuid" % self._uuid
++        return f"'{self._uuid}'::uuid"
+ 
+ 
+ def register_uuid(oids=None, conn_or_curs=None):
+@@ -698,7 +678,7 @@ def register_uuid(oids=None, conn_or_curs=None):
+ 
+ # a type, dbtype and adapter for PostgreSQL inet type
+ 
+-class Inet(object):
++class Inet:
+     """Wrap a string to allow for correct SQL-quoting of inet values.
+ 
+     Note that this adapter does NOT check the passed value to make
+@@ -710,7 +690,7 @@ class Inet(object):
+         self.addr = addr
+ 
+     def __repr__(self):
+-        return "%s(%r)" % (self.__class__.__name__, self.addr)
++        return f"{self.__class__.__name__}({self.addr!r})"
+ 
+     def prepare(self, conn):
+         self._conn = conn
+@@ -783,7 +763,7 @@ def wait_select(conn):
+             elif state == POLL_WRITE:
+                 select.select([], [conn.fileno()], [])
+             else:
+-                raise conn.OperationalError("bad state from poll: %s" % state)
++                raise conn.OperationalError(f"bad state from poll: {state}")
+         except KeyboardInterrupt:
+             conn.cancel()
+             # the loop will be broken by a server error
+@@ -805,7 +785,7 @@ def _solve_conn_curs(conn_or_curs):
+     return conn, curs
+ 
+ 
+-class HstoreAdapter(object):
++class HstoreAdapter:
+     """Adapt a Python dict to the hstore syntax."""
+     def __init__(self, wrapped):
+         self.wrapped = wrapped
+@@ -885,7 +865,7 @@ class HstoreAdapter(object):
+         for m in self._re_hstore.finditer(s):
+             if m is None or m.start() != start:
+                 raise psycopg2.InterfaceError(
+-                    "error parsing hstore pair at char %d" % start)
++                    f"error parsing hstore pair at char {start}")
+             k = _bsdec.sub(r'\1', m.group(1))
+             v = m.group(2)
+             if v is not None:
+@@ -896,7 +876,7 @@ class HstoreAdapter(object):
+ 
+         if start < len(s):
+             raise psycopg2.InterfaceError(
+-                "error parsing hstore: unparsed data after char %d" % start)
++                f"error parsing hstore: unparsed data after char {start}")
+ 
+         return rv
+ 
+@@ -924,12 +904,11 @@ class HstoreAdapter(object):
+         rv0, rv1 = [], []
+ 
+         # get the oid for the hstore
+-        curs.execute("""\
+-SELECT t.oid, %s
++        curs.execute(f"""SELECT t.oid, {typarray}
+ FROM pg_type t JOIN pg_namespace ns
+     ON typnamespace = ns.oid
+ WHERE typname = 'hstore';
+-""" % typarray)
++""")
+         for oids in curs:
+             rv0.append(oids[0])
+             rv1.append(oids[1])
+@@ -993,12 +972,7 @@ def register_hstore(conn_or_curs, globally=False, unicode=False,
+             array_oid = tuple([x for x in array_oid if x])
+ 
+     # create and register the typecaster
+-    if PY2 and unicode:
+-        cast = HstoreAdapter.parse_unicode
+-    else:
+-        cast = HstoreAdapter.parse
+-
+-    HSTORE = _ext.new_type(oid, "HSTORE", cast)
++    HSTORE = _ext.new_type(oid, "HSTORE", HstoreAdapter.parse)
+     _ext.register_type(HSTORE, not globally and conn_or_curs or None)
+     _ext.register_adapter(dict, HstoreAdapter)
+ 
+@@ -1007,7 +981,7 @@ def register_hstore(conn_or_curs, globally=False, unicode=False,
+         _ext.register_type(HSTOREARRAY, not globally and conn_or_curs or None)
+ 
+ 
+-class CompositeCaster(object):
++class CompositeCaster:
+     """Helps conversion of a PostgreSQL composite type into a Python object.
+ 
+     The class is usually created by the `register_composite()` function.
+@@ -1028,7 +1002,7 @@ class CompositeCaster(object):
+         self.typecaster = _ext.new_type((oid,), name, self.parse)
+         if array_oid:
+             self.array_typecaster = _ext.new_array_type(
+-                (array_oid,), "%sARRAY" % name, self.typecaster)
++                (array_oid,), f"{name}ARRAY", self.typecaster)
+         else:
+             self.array_typecaster = None
+ 
+@@ -1072,7 +1046,7 @@ class CompositeCaster(object):
+         rv = []
+         for m in self._re_tokenize.finditer(s):
+             if m is None:
+-                raise psycopg2.InterfaceError("can't parse type: %r" % s)
++                raise psycopg2.InterfaceError(f"can't parse type: {s!r}")
+             if m.group(1) is not None:
+                 rv.append(None)
+             elif m.group(2) is not None:
+@@ -1083,6 +1057,7 @@ class CompositeCaster(object):
+         return rv
+ 
+     def _create_type(self, name, attnames):
++        name = _re_clean.sub('_', name)
+         self.type = namedtuple(name, attnames)
+         self._ctor = self.type._make
+ 
+@@ -1120,14 +1095,46 @@ ORDER BY attnum;
+ 
+         recs = curs.fetchall()
+ 
++        if not recs:
++            # The above algorithm doesn't work for customized seach_path
++            # (#1487) The implementation below works better, but, to guarantee
++            # backwards compatibility, use it only if the original one failed.
++            try:
++                savepoint = False
++                # Because we executed statements earlier, we are either INTRANS
++                # or we are IDLE only if the transaction is autocommit, in
++                # which case we don't need the savepoint anyway.
++                if conn.status == _ext.STATUS_IN_TRANSACTION:
++                    curs.execute("SAVEPOINT register_type")
++                    savepoint = True
++
++                curs.execute("""\
++SELECT t.oid, %s, attname, atttypid, typname, nspname
++FROM pg_type t
++JOIN pg_namespace ns ON typnamespace = ns.oid
++JOIN pg_attribute a ON attrelid = typrelid
++WHERE t.oid = %%s::regtype
++    AND attnum > 0 AND NOT attisdropped
++ORDER BY attnum;
++""" % typarray, (name, ))
++            except psycopg2.ProgrammingError:
++                pass
++            else:
++                recs = curs.fetchall()
++                if recs:
++                    tname = recs[0][4]
++                    schema = recs[0][5]
++            finally:
++                if savepoint:
++                    curs.execute("ROLLBACK TO SAVEPOINT register_type")
++
+         # revert the status of the connection as before the command
+-        if (conn_status != _ext.STATUS_IN_TRANSACTION
+-        and not conn.autocommit):
++        if conn_status != _ext.STATUS_IN_TRANSACTION and not conn.autocommit:
+             conn.rollback()
+ 
+         if not recs:
+             raise psycopg2.ProgrammingError(
+-                "PostgreSQL type '%s' not found" % name)
++                f"PostgreSQL type '{name}' not found")
+ 
+         type_oid = recs[0][0]
+         array_oid = recs[0][1]
+@@ -1326,3 +1333,8 @@ def _split_sql(sql):
+         raise ValueError("the query doesn't contain any '%s' placeholder")
+ 
+     return pre, post
++
++
++# ascii except alnum and underscore
++_re_clean = _re.compile(
++    '[' + _re.escape(' !"#$%&\'()*+,-./:;<=>?@[\\]^`{|}~') + ']')
+--- a/lib/pool.py
++++ b/lib/pool.py
+@@ -33,7 +33,7 @@ class PoolError(psycopg2.Error):
+     pass
+ 
+ 
+-class AbstractConnectionPool(object):
++class AbstractConnectionPool:
+     """Generic key-based pooling code."""
+ 
+     def __init__(self, minconn, maxconn, *args, **kwargs):
+--- a/lib/sql.py
++++ b/lib/sql.py
+@@ -27,13 +27,12 @@
+ import string
+ 
+ from psycopg2 import extensions as ext
+-from psycopg2.compat import PY3, string_types
+ 
+ 
+ _formatter = string.Formatter()
+ 
+ 
+-class Composable(object):
++class Composable:
+     """
+     Abstract base class for objects that can be used to compose an SQL string.
+ 
+@@ -51,7 +50,7 @@ class Composable(object):
+         self._wrapped = wrapped
+ 
+     def __repr__(self):
+-        return "%s(%r)" % (self.__class__.__name__, self._wrapped)
++        return f"{self.__class__.__name__}({self._wrapped!r})"
+ 
+     def as_string(self, context):
+         """
+@@ -107,10 +106,10 @@ class Composed(Composable):
+         for i in seq:
+             if not isinstance(i, Composable):
+                 raise TypeError(
+-                    "Composed elements must be Composable, got %r instead" % i)
++                    f"Composed elements must be Composable, got {i!r} instead")
+             wrapped.append(i)
+ 
+-        super(Composed, self).__init__(wrapped)
++        super().__init__(wrapped)
+ 
+     @property
+     def seq(self):
+@@ -148,7 +147,7 @@ class Composed(Composable):
+             "foo", "bar"
+ 
+         """
+-        if isinstance(joiner, string_types):
++        if isinstance(joiner, str):
+             joiner = SQL(joiner)
+         elif not isinstance(joiner, SQL):
+             raise TypeError(
+@@ -180,9 +179,9 @@ class SQL(Composable):
+         select "foo", "bar" from "table"
+     """
+     def __init__(self, string):
+-        if not isinstance(string, string_types):
++        if not isinstance(string, str):
+             raise TypeError("SQL values must be strings")
+-        super(SQL, self).__init__(string)
++        super().__init__(string)
+ 
+     @property
+     def string(self):
+@@ -324,10 +323,10 @@ class Identifier(Composable):
+             raise TypeError("Identifier cannot be empty")
+ 
+         for s in strings:
+-            if not isinstance(s, string_types):
++            if not isinstance(s, str):
+                 raise TypeError("SQL identifier parts must be strings")
+ 
+-        super(Identifier, self).__init__(strings)
++        super().__init__(strings)
+ 
+     @property
+     def strings(self):
+@@ -345,9 +344,7 @@ class Identifier(Composable):
+                 "the Identifier wraps more than one than one string")
+ 
+     def __repr__(self):
+-        return "%s(%s)" % (
+-            self.__class__.__name__,
+-            ', '.join(map(repr, self._wrapped)))
++        return f"{self.__class__.__name__}({', '.join(map(repr, self._wrapped))})"
+ 
+     def as_string(self, context):
+         return '.'.join(ext.quote_ident(s, context) for s in self._wrapped)
+@@ -392,7 +389,7 @@ class Literal(Composable):
+             a.prepare(conn)
+ 
+         rv = a.getquoted()
+-        if PY3 and isinstance(rv, bytes):
++        if isinstance(rv, bytes):
+             rv = rv.decode(ext.encodings[conn.encoding])
+ 
+         return rv
+@@ -426,14 +423,14 @@ class Placeholder(Composable):
+     """
+ 
+     def __init__(self, name=None):
+-        if isinstance(name, string_types):
++        if isinstance(name, str):
+             if ')' in name:
+-                raise ValueError("invalid name: %r" % name)
++                raise ValueError(f"invalid name: {name!r}")
+ 
+         elif name is not None:
+-            raise TypeError("expected string or None as name, got %r" % name)
++            raise TypeError(f"expected string or None as name, got {name!r}")
+ 
+-        super(Placeholder, self).__init__(name)
++        super().__init__(name)
+ 
+     @property
+     def name(self):
+@@ -441,12 +438,14 @@ class Placeholder(Composable):
+         return self._wrapped
+ 
+     def __repr__(self):
+-        return "Placeholder(%r)" % (
+-            self._wrapped if self._wrapped is not None else '',)
++        if self._wrapped is None:
++            return f"{self.__class__.__name__}()"
++        else:
++            return f"{self.__class__.__name__}({self._wrapped!r})"
+ 
+     def as_string(self, context):
+         if self._wrapped is not None:
+-            return "%%(%s)s" % self._wrapped
++            return f"%({self._wrapped})s"
+         else:
+             return "%s"
+ 
+--- a/lib/tz.py
++++ b/lib/tz.py
+@@ -54,7 +54,9 @@ class FixedOffsetTimezone(datetime.tzinfo):
+ 
+     def __init__(self, offset=None, name=None):
+         if offset is not None:
+-            self._offset = datetime.timedelta(minutes=offset)
++            if not isinstance(offset, datetime.timedelta):
++                offset = datetime.timedelta(minutes=offset)
++            self._offset = offset
+         if name is not None:
+             self._name = name
+ 
+@@ -65,18 +67,28 @@ class FixedOffsetTimezone(datetime.tzinfo):
+         try:
+             return cls._cache[key]
+         except KeyError:
+-            tz = super(FixedOffsetTimezone, cls).__new__(cls, offset, name)
++            tz = super().__new__(cls, offset, name)
+             cls._cache[key] = tz
+             return tz
+ 
+     def __repr__(self):
+-        offset_mins = self._offset.seconds // 60 + self._offset.days * 24 * 60
+         return "psycopg2.tz.FixedOffsetTimezone(offset=%r, name=%r)" \
+-            % (offset_mins, self._name)
++            % (self._offset, self._name)
++
++    def __eq__(self, other):
++        if isinstance(other, FixedOffsetTimezone):
++            return self._offset == other._offset
++        else:
++            return NotImplemented
++
++    def __ne__(self, other):
++        if isinstance(other, FixedOffsetTimezone):
++            return self._offset != other._offset
++        else:
++            return NotImplemented
+ 
+     def __getinitargs__(self):
+-        offset_mins = self._offset.seconds // 60 + self._offset.days * 24 * 60
+-        return offset_mins, self._name
++        return self._offset, self._name
+ 
+     def utcoffset(self, dt):
+         return self._offset
+@@ -84,14 +96,16 @@ class FixedOffsetTimezone(datetime.tzinfo):
+     def tzname(self, dt):
+         if self._name is not None:
+             return self._name
+-        else:
+-            seconds = self._offset.seconds + self._offset.days * 86400
+-            hours, seconds = divmod(seconds, 3600)
+-            minutes = seconds / 60
+-            if minutes:
+-                return "%+03d:%d" % (hours, minutes)
+-            else:
+-                return "%+03d" % hours
++
++        minutes, seconds = divmod(self._offset.total_seconds(), 60)
++        hours, minutes = divmod(minutes, 60)
++        rv = "%+03d" % hours
++        if minutes or seconds:
++            rv += ":%02d" % minutes
++            if seconds:
++                rv += ":%02d" % seconds
++
++        return rv
+ 
+     def dst(self, dt):
+         return ZERO
+--- a/psycopg/adapter_asis.c
++++ b/psycopg/adapter_asis.c
+@@ -45,14 +45,12 @@ asis_getquoted(asisObject *self, PyObject *args)
+     }
+     else {
+         rv = PyObject_Str(self->wrapped);
+-#if PY_3
+-        /* unicode to bytes in Py3 */
++        /* unicode to bytes */
+         if (rv) {
+             PyObject *tmp = PyUnicode_AsUTF8String(rv);
+             Py_DECREF(rv);
+             rv = tmp;
+         }
+-#endif
+     }
+ 
+     return rv;
+--- a/psycopg/adapter_binary.c
++++ b/psycopg/adapter_binary.c
+@@ -76,15 +76,6 @@ binary_quote(binaryObject *self)
+         buffer_len = view.len;
+     }
+ 
+-#if PY_2
+-    if (!buffer && (Bytes_Check(self->wrapped) || PyBuffer_Check(self->wrapped))) {
+-        if (PyObject_AsReadBuffer(self->wrapped, (const void **)&buffer,
+-                                  &buffer_len) < 0) {
+-            goto exit;
+-        }
+-    }
+-#endif
+-
+     if (!buffer) {
+         goto exit;
+     }
+--- a/psycopg/adapter_datetime.c
++++ b/psycopg/adapter_datetime.c
+@@ -423,8 +423,8 @@ psyco_TimeFromTicks(PyObject *self, PyObject *args)
+ PyObject *
+ psyco_TimestampFromTicks(PyObject *self, PyObject *args)
+ {
+-    PyObject *m = NULL;
+-    PyObject *tz = NULL;
++    pydatetimeObject *wrapper = NULL;
++    PyObject *dt_aware = NULL;
+     PyObject *res = NULL;
+     struct tm tm;
+     time_t t;
+@@ -433,10 +433,6 @@ psyco_TimestampFromTicks(PyObject *self, PyObject *args)
+     if (!PyArg_ParseTuple(args, "d", &ticks))
+         return NULL;
+ 
+-    /* get psycopg2.tz.LOCAL from pythonland */
+-    if (!(m = PyImport_ImportModule("psycopg2.tz"))) { goto exit; }
+-    if (!(tz = PyObject_GetAttrString(m, "LOCAL"))) { goto exit; }
+-
+     t = (time_t)floor(ticks);
+     ticks -= (double)t;
+     if (!localtime_r(&t, &tm)) {
+@@ -444,14 +440,29 @@ psyco_TimestampFromTicks(PyObject *self, PyObject *args)
+         goto exit;
+     }
+ 
+-    res = _psyco_Timestamp(
+-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+-        tm.tm_hour, tm.tm_min, (double)tm.tm_sec + ticks,
+-        tz);
++    /* Convert the tm to a wrapper containing a naive datetime.datetime */
++    if (!(wrapper = (pydatetimeObject *)_psyco_Timestamp(
++            tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
++            tm.tm_hour, tm.tm_min, (double)tm.tm_sec + ticks, NULL))) {
++        goto exit;
++    }
++
++    /* Localize the datetime and assign it back to the wrapper */
++    if (!(dt_aware = PyObject_CallMethod(
++            wrapper->wrapped, "astimezone", NULL))) {
++        goto exit;
++    }
++    Py_CLEAR(wrapper->wrapped);
++    wrapper->wrapped = dt_aware;
++    dt_aware = NULL;
++
++    /* the wrapper is ready to be returned */
++    res = (PyObject *)wrapper;
++    wrapper = NULL;
+ 
+ exit:
+-    Py_XDECREF(tz);
+-    Py_XDECREF(m);
++    Py_XDECREF(dt_aware);
++    Py_XDECREF(wrapper);
+     return res;
+ }
+ 
+--- a/psycopg/adapter_pdecimal.c
++++ b/psycopg/adapter_pdecimal.c
+@@ -81,8 +81,7 @@ pdecimal_getquoted(pdecimalObject *self, PyObject *args)
+     /* res may be unicode and may suffer for issue #57 */
+ output:
+ 
+-#if PY_3
+-    /* unicode to bytes in Py3 */
++    /* unicode to bytes */
+     {
+         PyObject *tmp = PyUnicode_AsUTF8String(res);
+         Py_DECREF(res);
+@@ -90,7 +89,6 @@ output:
+             goto end;
+         }
+     }
+-#endif
+ 
+     if ('-' == Bytes_AS_STRING(res)[0]) {
+         /* Prepend a space in front of negative numbers (ticket #57) */
+--- a/psycopg/adapter_pfloat.c
++++ b/psycopg/adapter_pfloat.c
+@@ -54,8 +54,7 @@ pfloat_getquoted(pfloatObject *self, PyObject *args)
+             goto exit;
+         }
+ 
+-#if PY_3
+-        /* unicode to bytes in Py3 */
++        /* unicode to bytes */
+         {
+             PyObject *tmp = PyUnicode_AsUTF8String(rv);
+             Py_DECREF(rv);
+@@ -63,7 +62,6 @@ pfloat_getquoted(pfloatObject *self, PyObject *args)
+                 goto exit;
+             }
+         }
+-#endif
+ 
+         if ('-' == Bytes_AS_STRING(rv)[0]) {
+             /* Prepend a space in front of negative numbers (ticket #57) */
+--- a/psycopg/adapter_pint.c
++++ b/psycopg/adapter_pint.c
+@@ -40,11 +40,7 @@ pint_getquoted(pintObject *self, PyObject *args)
+ 
+     /* Convert subclass to int to handle IntEnum and other subclasses
+      * whose str() is not the number. */
+-    if (PyLong_CheckExact(self->wrapped)
+-#if PY_2
+-        || PyInt_CheckExact(self->wrapped)
+-#endif
+-       ) {
++    if (PyLong_CheckExact(self->wrapped)) {
+         res = PyObject_Str(self->wrapped);
+     } else {
+         PyObject *tmp;
+@@ -60,8 +56,7 @@ pint_getquoted(pintObject *self, PyObject *args)
+         goto exit;
+     }
+ 
+-#if PY_3
+-    /* unicode to bytes in Py3 */
++    /* unicode to bytes */
+     {
+         PyObject *tmp = PyUnicode_AsUTF8String(res);
+         Py_DECREF(res);
+@@ -69,7 +64,6 @@ pint_getquoted(pintObject *self, PyObject *args)
+             goto exit;
+         }
+     }
+-#endif
+ 
+     if ('-' == Bytes_AS_STRING(res)[0]) {
+         /* Prepend a space in front of negative numbers (ticket #57) */
+--- a/psycopg/connection_int.c
++++ b/psycopg/connection_int.c
+@@ -33,6 +33,7 @@
+ #include "psycopg/green.h"
+ #include "psycopg/notify.h"
+ 
++#include <stdlib.h>
+ #include <string.h>
+ 
+ /* String indexes match the ISOLATION_LEVEL_* consts */
+@@ -904,8 +905,14 @@ _conn_poll_advance_read(connectionObject *self)
+ 
+     Dprintf("conn_poll: poll reading");
+ 
++    Py_BEGIN_ALLOW_THREADS;
++    pthread_mutex_lock(&(self->lock));
++
+     busy = pq_get_result_async(self);
+ 
++    pthread_mutex_unlock(&(self->lock));
++    Py_END_ALLOW_THREADS;
++
+     switch (busy) {
+     case 0: /* result is ready */
+         Dprintf("conn_poll: async_status -> ASYNC_DONE");
+--- a/psycopg/connection_type.c
++++ b/psycopg/connection_type.c
+@@ -35,6 +35,7 @@
+ #include "psycopg/green.h"
+ #include "psycopg/xid.h"
+ 
++#include <stdlib.h>
+ #include <string.h>
+ #include <ctype.h>
+ 
+--- a/psycopg/cursor_type.c
++++ b/psycopg/cursor_type.c
+@@ -1133,7 +1133,7 @@ exit:
+             }
+         }
+     }
+-    PyMem_Del(scpnames);
++    PyMem_Free(scpnames);
+     Py_XDECREF(pname);
+     Py_XDECREF(pnames);
+     Py_XDECREF(operation);
+@@ -1919,10 +1919,11 @@ cursor_setup(cursorObject *self, connectionObject *conn, const char *name)
+ 
+     /* default tzinfo factory */
+     {
++        /* The datetime api doesn't seem to have a constructor to make a
++         * datetime.timezone, so use the Python interface. */
+         PyObject *m = NULL;
+-        if ((m = PyImport_ImportModule("psycopg2.tz"))) {
+-            self->tzinfo_factory = PyObject_GetAttrString(
+-                    m, "FixedOffsetTimezone");
++        if ((m = PyImport_ImportModule("datetime"))) {
++            self->tzinfo_factory = PyObject_GetAttrString(m, "timezone");
+             Py_DECREF(m);
+         }
+         if (!self->tzinfo_factory) {
+--- a/psycopg/error_type.c
++++ b/psycopg/error_type.c
+@@ -65,6 +65,8 @@ base_exception_from_sqlstate(const char *sqlstate)
+     switch (sqlstate[0]) {
+     case '0':
+         switch (sqlstate[1]) {
++        case '8': /* Class 08 - Connection Exception */
++            return OperationalError;
+         case 'A': /* Class 0A - Feature Not Supported */
+             return NotSupportedError;
+         }
+--- a/psycopg/libpq_support.c
++++ b/psycopg/libpq_support.c
+@@ -38,6 +38,7 @@
+ #include "psycopg/win32_support.h"
+ #else
+ #include <arpa/inet.h>
++#include <sys/time.h>
+ #endif
+ 
+ /* support routines taken from pg_basebackup/streamutil.c */
+--- a/psycopg/lobject_int.c
++++ b/psycopg/lobject_int.c
+@@ -85,11 +85,7 @@ _lobject_parse_mode(const char *mode)
+             pos += 1;
+             break;
+         default:
+-#if PY_2
+-            rv |= LOBJECT_BINARY;
+-#else
+             rv |= LOBJECT_TEXT;
+-#endif
+             break;
+     }
+ 
+--- a/psycopg/microprotocols.c
++++ b/psycopg/microprotocols.c
+@@ -92,11 +92,7 @@ _get_superclass_adapter(PyObject *obj, PyObject *proto)
+     Py_ssize_t i, ii;
+ 
+     type = Py_TYPE(obj);
+-    if (!(
+-#if PY_2
+-        (Py_TPFLAGS_HAVE_CLASS & type->tp_flags) &&
+-#endif
+-        type->tp_mro)) {
++    if (!(type->tp_mro)) {
+         /* has no mro */
+         return Py_None;
+     }
+--- a/psycopg/pqpath.c
++++ b/psycopg/pqpath.c
+@@ -47,6 +47,7 @@
+ #include "psycopg/libpq_support.h"
+ #include "libpq-fe.h"
+ 
++#include <stdlib.h>
+ #ifdef _WIN32
+ /* select() */
+ #include <winsock2.h>
+--- a/psycopg/psycopgmodule.c
++++ b/psycopg/psycopgmodule.c
+@@ -53,15 +53,12 @@
+ #include "psycopg/adapter_list.h"
+ #include "psycopg/typecast_binary.h"
+ 
+-#ifdef HAVE_MXDATETIME
+-#include <mxDateTime.h>
+-#include "psycopg/adapter_mxdatetime.h"
+-#endif
+-
+ /* some module-level variables, like the datetime module */
+ #include <datetime.h>
+ #include "psycopg/adapter_datetime.h"
+ 
++#include <stdlib.h>
++
+ HIDDEN PyObject *psycoEncodings = NULL;
+ HIDDEN PyObject *sqlstate_errors = NULL;
+ 
+@@ -309,11 +306,6 @@ adapters_init(PyObject *module)
+     if (0 > microprotocols_add(&PyFloat_Type, NULL, (PyObject*)&pfloatType)) {
+         goto exit;
+     }
+-#if PY_2
+-    if (0 > microprotocols_add(&PyInt_Type, NULL, (PyObject*)&pintType)) {
+-        goto exit;
+-    }
+-#endif
+     if (0 > microprotocols_add(&PyLong_Type, NULL, (PyObject*)&pintType)) {
+         goto exit;
+     }
+@@ -322,25 +314,14 @@ adapters_init(PyObject *module)
+     }
+ 
+     /* strings */
+-#if PY_2
+-    if (0 > microprotocols_add(&PyString_Type, NULL, (PyObject*)&qstringType)) {
+-        goto exit;
+-    }
+-#endif
+     if (0 > microprotocols_add(&PyUnicode_Type, NULL, (PyObject*)&qstringType)) {
+         goto exit;
+     }
+ 
+     /* binary */
+-#if PY_2
+-    if (0 > microprotocols_add(&PyBuffer_Type, NULL, (PyObject*)&binaryType)) {
+-        goto exit;
+-    }
+-#else
+     if (0 > microprotocols_add(&PyBytes_Type, NULL, (PyObject*)&binaryType)) {
+         goto exit;
+     }
+-#endif
+ 
+     if (0 > microprotocols_add(&PyByteArray_Type, NULL, (PyObject*)&binaryType)) {
+         goto exit;
+@@ -374,30 +355,6 @@ adapters_init(PyObject *module)
+     if (0 > microprotocols_add(PyDateTimeAPI->DeltaType, NULL, obj)) { goto exit; }
+     Py_CLEAR(obj);
+ 
+-#ifdef HAVE_MXDATETIME
+-    /* As above, we use the callable objects from the psycopg module.
+-       These object are not be available at runtime if mx.DateTime import
+-       failed (e.g. it was available at build time but not at runtime). */
+-    if (PyMapping_HasKeyString(dict, "TimestampFromMx")) {
+-        if (!(obj = PyMapping_GetItemString(dict, "TimestampFromMx"))) {
+-            goto exit;
+-        }
+-        if (0 > microprotocols_add(mxDateTime.DateTime_Type, NULL, obj)) {
+-            goto exit;
+-        }
+-        Py_CLEAR(obj);
+-
+-        /* if we found the above, we have this too. */
+-        if (!(obj = PyMapping_GetItemString(dict, "TimeFromMx"))) {
+-            goto exit;
+-        }
+-        if (0 > microprotocols_add(mxDateTime.DateTimeDelta_Type, NULL, obj)) {
+-            goto exit;
+-        }
+-        Py_CLEAR(obj);
+-    }
+-#endif
+-
+     /* Success! */
+     rv = 0;
+ 
+@@ -959,34 +916,6 @@ datetime_init(void)
+     return 0;
+ }
+ 
+-RAISES_NEG static int
+-mxdatetime_init(PyObject *module)
+-{
+-    Dprintf("psycopgmodule: initializing mx.DateTime module");
+-
+-#ifdef HAVE_MXDATETIME
+-    Py_SET_TYPE(&mxdatetimeType, &PyType_Type);
+-    if (0 > PyType_Ready(&mxdatetimeType)) { return -1; }
+-
+-    if (mxDateTime_ImportModuleAndAPI()) {
+-        Dprintf("psycopgmodule: mx.DateTime module import failed");
+-        PyErr_Clear();
+-    }
+-
+-    /* If we can't find mx.DateTime objects at runtime,
+-     * remove them from the module (and, as consequence, from the adapters). */
+-    if (0 != psyco_adapter_mxdatetime_init()) {
+-        PyObject *dict;
+-        if (!(dict = PyModule_GetDict(module))) { return -1; }
+-        if (0 > PyDict_DelItemString(dict, "DateFromMx")) { return -1; }
+-        if (0 > PyDict_DelItemString(dict, "TimeFromMx")) { return -1; }
+-        if (0 > PyDict_DelItemString(dict, "TimestampFromMx")) { return -1; }
+-        if (0 > PyDict_DelItemString(dict, "IntervalFromMx")) { return -1; }
+-    }
+-#endif
+-    return 0;
+-}
+-
+ /** method table and module initialization **/
+ 
+ static PyMethodDef psycopgMethods[] = {
+@@ -1030,18 +959,6 @@ static PyMethodDef psycopgMethods[] = {
+     {"IntervalFromPy",  (PyCFunction)psyco_IntervalFromPy,
+      METH_VARARGS, psyco_IntervalFromPy_doc},
+ 
+-#ifdef HAVE_MXDATETIME
+-    /* to be deleted if not found at import time */
+-    {"DateFromMx",  (PyCFunction)psyco_DateFromMx,
+-     METH_VARARGS, psyco_DateFromMx_doc},
+-    {"TimeFromMx",  (PyCFunction)psyco_TimeFromMx,
+-     METH_VARARGS, psyco_TimeFromMx_doc},
+-    {"TimestampFromMx",  (PyCFunction)psyco_TimestampFromMx,
+-     METH_VARARGS, psyco_TimestampFromMx_doc},
+-    {"IntervalFromMx",  (PyCFunction)psyco_IntervalFromMx,
+-     METH_VARARGS, psyco_IntervalFromMx_doc},
+-#endif
+-
+     {"set_wait_callback",  (PyCFunction)psyco_set_wait_callback,
+      METH_O, psyco_set_wait_callback_doc},
+     {"get_wait_callback",  (PyCFunction)psyco_get_wait_callback,
+@@ -1052,7 +969,6 @@ static PyMethodDef psycopgMethods[] = {
+     {NULL, NULL, 0, NULL}        /* Sentinel */
+ };
+ 
+-#if PY_3
+ static struct PyModuleDef psycopgmodule = {
+         PyModuleDef_HEAD_INIT,
+         "_psycopg",
+@@ -1064,7 +980,6 @@ static struct PyModuleDef psycopgmodule = {
+         NULL,
+         NULL
+ };
+-#endif
+ 
+ #ifndef PyMODINIT_FUNC	/* declarations for DLL import/export */
+ #define PyMODINIT_FUNC void
+@@ -1086,41 +1001,35 @@ INIT_MODULE(_psycopg)(void)
+ 
+     /* initialize types and objects not exposed to the module */
+     Py_SET_TYPE(&typecastType, &PyType_Type);
+-    if (0 > PyType_Ready(&typecastType)) { goto exit; }
++    if (0 > PyType_Ready(&typecastType)) { goto error; }
+ 
+     Py_SET_TYPE(&chunkType, &PyType_Type);
+-    if (0 > PyType_Ready(&chunkType)) { goto exit; }
++    if (0 > PyType_Ready(&chunkType)) { goto error; }
+ 
+     Py_SET_TYPE(&errorType, &PyType_Type);
+     errorType.tp_base = (PyTypeObject *)PyExc_StandardError;
+-    if (0 > PyType_Ready(&errorType)) { goto exit; }
++    if (0 > PyType_Ready(&errorType)) { goto error; }
+ 
+-    if (!(psyco_null = Bytes_FromString("NULL"))) { goto exit; }
++    if (!(psyco_null = Bytes_FromString("NULL"))) { goto error; }
+ 
+     /* initialize the module */
+-#if PY_2
+-    module = Py_InitModule("_psycopg", psycopgMethods);
+-#else
+     module = PyModule_Create(&psycopgmodule);
+-#endif
+-    if (!module) { goto exit; }
+-
+-    if (0 > add_module_constants(module)) { goto exit; }
+-    if (0 > add_module_types(module)) { goto exit; }
+-    if (0 > datetime_init()) { goto exit; }
+-    if (0 > mxdatetime_init(module)) { goto exit; }
+-    if (0 > encodings_init(module)) { goto exit; }
+-    if (0 > typecast_init(module)) { goto exit; }
+-    if (0 > adapters_init(module)) { goto exit; }
+-    if (0 > basic_errors_init(module)) { goto exit; }
+-    if (0 > sqlstate_errors_init(module)) { goto exit; }
++    if (!module) { goto error; }
+ 
+-    Dprintf("psycopgmodule: module initialization complete");
++    if (0 > add_module_constants(module)) { goto error; }
++    if (0 > add_module_types(module)) { goto error; }
++    if (0 > datetime_init()) { goto error; }
++    if (0 > encodings_init(module)) { goto error; }
++    if (0 > typecast_init(module)) { goto error; }
++    if (0 > adapters_init(module)) { goto error; }
++    if (0 > basic_errors_init(module)) { goto error; }
++    if (0 > sqlstate_errors_init(module)) { goto error; }
+ 
+-exit:
+-#if PY_3
++    Dprintf("psycopgmodule: module initialization complete");
+     return module;
+-#else
+-    return;
+-#endif
++
++error:
++    if (module)
++        Py_DECREF(module);
++    return NULL;
+ }
+--- a/psycopg/python.h
++++ b/psycopg/python.h
+@@ -27,30 +27,11 @@
+ #ifndef PSYCOPG_PYTHON_H
+ #define PSYCOPG_PYTHON_H 1
+ 
+-#define PY_2 (PY_MAJOR_VERSION == 2)
+-#define PY_3 (PY_MAJOR_VERSION == 3)
+-
+-#if PY_2 && PY_VERSION_HEX < 0x02070000
+-#error "psycopg requires Python 2.7"
+-#endif
+-
+-#if PY_3 && PY_VERSION_HEX < 0x03040000
+-#error "psycopg requires Python 3.4"
++#if PY_VERSION_HEX < 0x03090000
++#error "psycopg requires Python 3.9"
+ #endif
+ 
+ #include <structmember.h>
+-#if PY_2
+-#include <stringobject.h>
+-#endif
+-
+-/* hash() return size changed around version 3.2a4 on 64bit platforms.  Before
+- *   this, the return size was always a long, regardless of arch.  ~3.2
+- *   introduced the Py_hash_t & Py_uhash_t typedefs with the resulting sizes
+- *   based upon arch. */
+-#if PY_VERSION_HEX < 0x030200A4
+-typedef long Py_hash_t;
+-typedef unsigned long Py_uhash_t;
+-#endif
+ 
+ /* Since Py_TYPE() is changed to the inline static function,
+  * Py_TYPE(obj) = new_type must be replaced with Py_SET_TYPE(obj, new_type)
+@@ -72,43 +53,6 @@ typedef unsigned long Py_uhash_t;
+   #define FORMAT_CODE_SIZE_T "%zu"
+ #endif
+ 
+-#if PY_2
+-
+-#define Text_Type PyString_Type
+-#define Text_Check(s) PyString_Check(s)
+-#define Text_Format(f,a) PyString_Format(f,a)
+-#define Text_FromUTF8(s) PyString_FromString(s)
+-#define Text_FromUTF8AndSize(s,n) PyString_FromStringAndSize(s,n)
+-
+-#define Bytes_Type PyString_Type
+-#define Bytes_Check PyString_Check
+-#define Bytes_CheckExact PyString_CheckExact
+-#define Bytes_AS_STRING PyString_AS_STRING
+-#define Bytes_GET_SIZE PyString_GET_SIZE
+-#define Bytes_Size PyString_Size
+-#define Bytes_AsString PyString_AsString
+-#define Bytes_AsStringAndSize PyString_AsStringAndSize
+-#define Bytes_FromString PyString_FromString
+-#define Bytes_FromStringAndSize PyString_FromStringAndSize
+-#define Bytes_FromFormat PyString_FromFormat
+-#define Bytes_ConcatAndDel PyString_ConcatAndDel
+-#define _Bytes_Resize _PyString_Resize
+-
+-#define PyDateTime_DELTA_GET_DAYS(o)         (((PyDateTime_Delta*)o)->days)
+-#define PyDateTime_DELTA_GET_SECONDS(o)      (((PyDateTime_Delta*)o)->seconds)
+-#define PyDateTime_DELTA_GET_MICROSECONDS(o) (((PyDateTime_Delta*)o)->microseconds)
+-
+-#define INIT_MODULE(m) init ## m
+-
+-/* fix #961, but don't change all types to longs. Sure someone will complain. */
+-#define PyLong_FromOid(x) (((x) & 0x80000000) ? \
+-    PyLong_FromUnsignedLong((unsigned long)(x)) : \
+-    PyInt_FromLong((x)))
+-
+-#endif  /* PY_2 */
+-
+-#if PY_3
+-
+ #define Text_Type PyUnicode_Type
+ #define Text_Check(s) PyUnicode_Check(s)
+ #define Text_Format(f,a) PyUnicode_Format(f,a)
+@@ -149,8 +93,6 @@ typedef unsigned long Py_uhash_t;
+ 
+ #define PyLong_FromOid(x) (PyLong_FromUnsignedLong((unsigned long)(x)))
+ 
+-#endif  /* PY_3 */
+-
+ /* expose Oid attributes in Python C objects */
+ #define T_OID T_UINT
+ 
+--- a/psycopg/replication_connection_type.c
++++ b/psycopg/replication_connection_type.c
+@@ -129,6 +129,11 @@ replicationConnection_repr(replicationConnectionObject *self)
+         self, self->conn.dsn, self->conn.closed);
+ }
+ 
++static int
++replicationConnectionType_traverse(PyObject *self, visitproc visit, void *arg)
++{
++    return connectionType.tp_traverse(self, visit, arg);
++}
+ 
+ /* object calculated member list */
+ 
+@@ -173,7 +178,7 @@ PyTypeObject replicationConnectionType = {
+     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_ITER |
+       Py_TPFLAGS_HAVE_GC, /*tp_flags*/
+     replicationConnectionType_doc, /*tp_doc*/
+-    0,          /*tp_traverse*/
++    replicationConnectionType_traverse, /*tp_traverse*/
+     0,          /*tp_clear*/
+     0,          /*tp_richcompare*/
+     0,          /*tp_weaklistoffset*/
+--- a/psycopg/replication_cursor_type.c
++++ b/psycopg/replication_cursor_type.c
+@@ -34,6 +34,9 @@
+ 
+ #include <string.h>
+ #include <stdlib.h>
++#ifndef _WIN32
++#include <sys/time.h>
++#endif
+ 
+ /* python */
+ #include "datetime.h"
+@@ -346,6 +349,11 @@ replicationCursor_repr(replicationCursorObject *self)
+         "<ReplicationCursor object at %p; closed: %d>", self, self->cur.closed);
+ }
+ 
++static int
++replicationCursorType_traverse(PyObject *self, visitproc visit, void *arg)
++{
++    return cursorType.tp_traverse(self, visit, arg);
++}
+ 
+ /* object type */
+ 
+@@ -374,7 +382,7 @@ PyTypeObject replicationCursorType = {
+     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_ITER |
+       Py_TPFLAGS_HAVE_GC, /*tp_flags*/
+     replicationCursorType_doc, /*tp_doc*/
+-    0,          /*tp_traverse*/
++    replicationCursorType_traverse, /*tp_traverse*/
+     0,          /*tp_clear*/
+     0,          /*tp_richcompare*/
+     0,          /*tp_weaklistoffset*/
+--- a/psycopg/sqlstate_errors.h
++++ b/psycopg/sqlstate_errors.h
+@@ -111,6 +111,7 @@
+ {"2203D", "TooManyJsonArrayElements"},
+ {"2203E", "TooManyJsonObjectMembers"},
+ {"2203F", "SqlJsonScalarRequired"},
++{"2203G", "SqlJsonItemCannotBeCastToTargetType"},
+ {"22P01", "FloatingPointException"},
+ {"22P02", "InvalidTextRepresentation"},
+ {"22P03", "InvalidBinaryRepresentation"},
+@@ -279,6 +280,7 @@
+ {"57P02", "CrashShutdown"},
+ {"57P03", "CannotConnectNow"},
+ {"57P04", "DatabaseDropped"},
++{"57P05", "IdleSessionTimeout"},
+ 
+ /* Class 58 - System Error (errors external to PostgreSQL itself) */
+ {"58000", "SystemError"},
+--- a/psycopg/typecast.c
++++ b/psycopg/typecast.c
+@@ -32,15 +32,6 @@
+ 
+ /* useful function used by some typecasters */
+ 
+-#ifdef HAVE_MXDATETIME
+-static const char *
+-skip_until_space(const char *s)
+-{
+-    while (*s && *s != ' ') s++;
+-    return s;
+-}
+-#endif
+-
+ static const char *
+ skip_until_space2(const char *s, Py_ssize_t *len)
+ {
+@@ -82,11 +73,11 @@ typecast_parse_date(const char* s, const char** t, Py_ssize_t* len,
+         cz += 1;
+     }
+ 
+-    /* Is this a BC date?  If so, adjust the year value.  Note that
+-     * mx.DateTime numbers BC dates from zero rather than one.  The
+-     * Python datetime module does not support BC dates at all. */
++    /* Is this a BC date?  If so, adjust the year value.  However
++     * Python datetime module does not support BC dates, so this will raise
++     * an exception downstream. */
+     if (*len >= 2 && s[*len-2] == 'B' && s[*len-1] == 'C')
+-        *year = 1 - (*year);
++        *year = -(*year);
+ 
+     if (t != NULL) *t = s;
+ 
+@@ -175,11 +166,6 @@ typecast_parse_time(const char* s, const char** t, Py_ssize_t* len,
+ #include "psycopg/typecast_basic.c"
+ #include "psycopg/typecast_binary.c"
+ #include "psycopg/typecast_datetime.c"
+-
+-#ifdef HAVE_MXDATETIME
+-#include "psycopg/typecast_mxdatetime.c"
+-#endif
+-
+ #include "psycopg/typecast_array.c"
+ 
+ static long int typecast_default_DEFAULT[] = {0};
+@@ -218,29 +204,6 @@ static typecastObject_initlist typecast_pydatetime[] = {
+     {NULL, NULL, NULL}
+ };
+ 
+-#ifdef HAVE_MXDATETIME
+-#define typecast_MXDATETIMEARRAY_cast typecast_GENERIC_ARRAY_cast
+-#define typecast_MXDATETIMETZARRAY_cast typecast_GENERIC_ARRAY_cast
+-#define typecast_MXDATEARRAY_cast typecast_GENERIC_ARRAY_cast
+-#define typecast_MXTIMEARRAY_cast typecast_GENERIC_ARRAY_cast
+-#define typecast_MXINTERVALARRAY_cast typecast_GENERIC_ARRAY_cast
+-
+-/* a list of initializers, used to make the typecasters accessible anyway */
+-static typecastObject_initlist typecast_mxdatetime[] = {
+-    {"MXDATETIME", typecast_DATETIME_types, typecast_MXDATE_cast},
+-    {"MXDATETIMETZ", typecast_DATETIMETZ_types, typecast_MXDATE_cast},
+-    {"MXTIME", typecast_TIME_types, typecast_MXTIME_cast},
+-    {"MXDATE", typecast_DATE_types, typecast_MXDATE_cast},
+-    {"MXINTERVAL", typecast_INTERVAL_types, typecast_MXINTERVAL_cast},
+-    {"MXDATETIMEARRAY", typecast_DATETIMEARRAY_types, typecast_MXDATETIMEARRAY_cast, "MXDATETIME"},
+-    {"MXDATETIMETZARRAY", typecast_DATETIMETZARRAY_types, typecast_MXDATETIMETZARRAY_cast, "MXDATETIMETZ"},
+-    {"MXTIMEARRAY", typecast_TIMEARRAY_types, typecast_MXTIMEARRAY_cast, "MXTIME"},
+-    {"MXDATEARRAY", typecast_DATEARRAY_types, typecast_MXDATEARRAY_cast, "MXDATE"},
+-    {"MXINTERVALARRAY", typecast_INTERVALARRAY_types, typecast_MXINTERVALARRAY_cast, "MXINTERVAL"},
+-    {NULL, NULL, NULL}
+-};
+-#endif
+-
+ 
+ /** the type dictionary and associated functions **/
+ 
+@@ -291,18 +254,6 @@ typecast_init(PyObject *module)
+     psyco_default_cast = typecast_from_c(&typecast_default, dict);
+ 
+     /* register the date/time typecasters with their original names */
+-#ifdef HAVE_MXDATETIME
+-    if (0 == typecast_mxdatetime_init()) {
+-        for (i = 0; typecast_mxdatetime[i].name != NULL; i++) {
+-            t = (typecastObject *)typecast_from_c(&(typecast_mxdatetime[i]), dict);
+-            if (t == NULL) { goto exit; }
+-            PyDict_SetItem(dict, t->name, (PyObject *)t);
+-            Py_DECREF((PyObject *)t);
+-            t = NULL;
+-        }
+-    }
+-#endif
+-
+     if (0 > typecast_datetime_init()) { goto exit; }
+     for (i = 0; typecast_pydatetime[i].name != NULL; i++) {
+         t = (typecastObject *)typecast_from_c(&(typecast_pydatetime[i]), dict);
+@@ -475,11 +426,7 @@ PyTypeObject typecastType = {
+     0,          /*tp_print*/
+     0,          /*tp_getattr*/
+     0,          /*tp_setattr*/
+-#if PY_VERSION_HEX < 0x03000000
+-    typecast_cmp, /*tp_compare*/
+-#else
+     0,          /*tp_reserved*/
+-#endif
+     typecast_repr, /*tp_repr*/
+     0,          /*tp_as_number*/
+     0,          /*tp_as_sequence*/
+@@ -651,11 +598,7 @@ typecast_cast(PyObject *obj, const char *str, Py_ssize_t len, PyObject *curs)
+          * Notice that this way it is about impossible to create a python
+          * typecaster on a binary type. */
+         if (str) {
+-#if PY_2
+-            s = PyString_FromStringAndSize(str, len);
+-#else
+             s = conn_decode(((cursorObject *)curs)->conn, str, len);
+-#endif
+         }
+         else {
+             Py_INCREF(Py_None);
+--- a/psycopg/typecast_basic.c
++++ b/psycopg/typecast_basic.c
+@@ -26,22 +26,7 @@
+ 
+ /** INTEGER - cast normal integers (4 bytes) to python int **/
+ 
+-#if PY_2
+-static PyObject *
+-typecast_INTEGER_cast(const char *s, Py_ssize_t len, PyObject *curs)
+-{
+-    char buffer[12];
+-
+-    if (s == NULL) { Py_RETURN_NONE; }
+-    if (s[len] != '\0') {
+-        strncpy(buffer, s, (size_t) len); buffer[len] = '\0';
+-        s = buffer;
+-    }
+-    return PyInt_FromString((char *)s, NULL, 0);
+-}
+-#else
+ #define typecast_INTEGER_cast typecast_LONGINTEGER_cast
+-#endif
+ 
+ /** LONGINTEGER - cast long integers (8 bytes) to python long **/
+ 
+@@ -67,11 +52,7 @@ typecast_FLOAT_cast(const char *s, Py_ssize_t len, PyObject *curs)
+ 
+     if (s == NULL) { Py_RETURN_NONE; }
+     if (!(str = Text_FromUTF8AndSize(s, len))) { return NULL; }
+-#if PY_2
+-    flo = PyFloat_FromString(str, NULL);
+-#else
+     flo = PyFloat_FromString(str);
+-#endif
+     Py_DECREF(str);
+     return flo;
+ }
+@@ -103,11 +84,7 @@ typecast_UNICODE_cast(const char *s, Py_ssize_t len, PyObject *curs)
+ 
+ /** STRING - cast strings of any type to python string **/
+ 
+-#if PY_2
+-#define typecast_STRING_cast typecast_BYTES_cast
+-#else
+ #define typecast_STRING_cast typecast_UNICODE_cast
+-#endif
+ 
+ 
+ /** BOOLEAN - cast boolean value into right python object **/
+--- a/psycopg/typecast_binary.c
++++ b/psycopg/typecast_binary.c
+@@ -54,39 +54,6 @@ chunk_repr(chunkObject *self)
+       );
+ }
+ 
+-#if PY_2
+-
+-static Py_ssize_t
+-chunk_getreadbuffer(chunkObject *self, Py_ssize_t segment, void **ptr)
+-{
+-    if (segment != 0)
+-    {
+-        PyErr_SetString(PyExc_SystemError,
+-                        "accessing non-existant buffer segment");
+-        return -1;
+-    }
+-    *ptr = self->base;
+-    return self->len;
+-}
+-
+-static Py_ssize_t
+-chunk_getsegcount(chunkObject *self, Py_ssize_t *lenp)
+-{
+-    if (lenp != NULL)
+-        *lenp = self->len;
+-    return 1;
+-}
+-
+-static PyBufferProcs chunk_as_buffer =
+-{
+-    (readbufferproc) chunk_getreadbuffer,
+-    (writebufferproc) NULL,
+-    (segcountproc) chunk_getsegcount,
+-    (charbufferproc) NULL
+-};
+-
+-#else
+-
+ /* 3.0 buffer interface */
+ int chunk_getbuffer(PyObject *_self, Py_buffer *view, int flags)
+ {
+@@ -105,8 +72,6 @@ static PyBufferProcs chunk_as_buffer =
+     NULL,
+ };
+ 
+-#endif
+-
+ #define chunk_doc "memory chunk"
+ 
+ PyTypeObject chunkType = {
+@@ -183,13 +148,8 @@ typecast_BINARY_cast(const char *s, Py_ssize_t l, PyObject *curs)
+     buffer = NULL;
+     chunk->len = (Py_ssize_t)len;
+ 
+-#if PY_2
+-    if ((res = PyBuffer_FromObject((PyObject *)chunk, 0, chunk->len)) == NULL)
+-        goto exit;
+-#else
+     if ((res = PyMemoryView_FromObject((PyObject*)chunk)) == NULL)
+         goto exit;
+-#endif
+ 
+ exit:
+     Py_XDECREF((PyObject *)chunk);
+--- a/psycopg/typecast_datetime.c
++++ b/psycopg/typecast_datetime.c
+@@ -71,7 +71,6 @@ typecast_PYDATE_cast(const char *str, Py_ssize_t len, PyObject *curs)
+             return NULL;
+         }
+         else {
+-            if (y > 9999) y = 9999;
+             obj = PyObject_CallFunction(
+                 (PyObject*)PyDateTimeAPI->DateType, "iii", y, m, d);
+         }
+@@ -104,9 +103,8 @@ _parse_inftz(const char *str, PyObject *curs)
+         goto exit;
+     }
+ 
+-    if (!(tzinfo = PyObject_CallFunction(tzinfo_factory, "i", 0))) {
+-        goto exit;
+-    }
++    tzinfo = PyDateTime_TimeZone_UTC;
++    Py_INCREF(tzinfo);
+ 
+     /* m.replace(tzinfo=tzinfo) */
+     if (!(args = PyTuple_New(0))) { goto exit; }
+@@ -129,10 +127,11 @@ static PyObject *
+ _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
+ {
+     PyObject* rv = NULL;
++    PyObject *tzoff = NULL;
+     PyObject *tzinfo = NULL;
+     PyObject *tzinfo_factory;
+     int n, y=0, m=0, d=0;
+-    int hh=0, mm=0, ss=0, us=0, tz=0;
++    int hh=0, mm=0, ss=0, us=0, tzsec=0;
+     const char *tp = NULL;
+ 
+     Dprintf("typecast_PYDATETIMETZ_cast: s = %s", str);
+@@ -147,11 +146,11 @@ _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
+     }
+ 
+     if (len > 0) {
+-        n = typecast_parse_time(tp, NULL, &len, &hh, &mm, &ss, &us, &tz);
++        n = typecast_parse_time(tp, NULL, &len, &hh, &mm, &ss, &us, &tzsec);
+         Dprintf("typecast_PYDATETIMETZ_cast: n = %d,"
+             " len = " FORMAT_CODE_PY_SSIZE_T ","
+-            " hh = %d, mm = %d, ss = %d, us = %d, tz = %d",
+-            n, len, hh, mm, ss, us, tz);
++            " hh = %d, mm = %d, ss = %d, us = %d, tzsec = %d",
++            n, len, hh, mm, ss, us, tzsec);
+         if (n < 3 || n > 6) {
+             PyErr_SetString(DataError, "unable to parse time");
+             goto exit;
+@@ -162,21 +161,16 @@ _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
+         mm += 1;
+         ss -= 60;
+     }
+-    if (y > 9999)
+-        y = 9999;
+ 
+     tzinfo_factory = ((cursorObject *)curs)->tzinfo_factory;
+     if (n >= 5 && tzinfo_factory != Py_None) {
+         /* we have a time zone, calculate minutes and create
+            appropriate tzinfo object calling the factory */
+-        Dprintf("typecast_PYDATETIMETZ_cast: UTC offset = %ds", tz);
+-
+-        /* The datetime module requires that time zone offsets be
+-           a whole number of minutes, so truncate the seconds to the
+-           closest minute. */
+-        // printf("%d %d %d\n", tz, tzmin, round(tz / 60.0));
+-        if (!(tzinfo = PyObject_CallFunction(tzinfo_factory, "i",
+-                (int)round(tz / 60.0)))) {
++        Dprintf("typecast_PYDATETIMETZ_cast: UTC offset = %ds", tzsec);
++
++        if (!(tzoff = PyDelta_FromDSU(0, tzsec, 0))) { goto exit; }
++        if (!(tzinfo = PyObject_CallFunctionObjArgs(
++                tzinfo_factory, tzoff, NULL))) {
+             goto exit;
+         }
+     } else {
+@@ -192,6 +186,7 @@ _parse_noninftz(const char *str, Py_ssize_t len, PyObject *curs)
+         y, m, d, hh, mm, ss, us, tzinfo);
+ 
+ exit:
++    Py_XDECREF(tzoff);
+     Py_XDECREF(tzinfo);
+     return rv;
+ }
+@@ -232,17 +227,18 @@ typecast_PYDATETIMETZ_cast(const char *str, Py_ssize_t len, PyObject *curs)
+ static PyObject *
+ typecast_PYTIME_cast(const char *str, Py_ssize_t len, PyObject *curs)
+ {
+-    PyObject* obj = NULL;
++    PyObject* rv = NULL;
++    PyObject *tzoff = NULL;
+     PyObject *tzinfo = NULL;
+     PyObject *tzinfo_factory;
+-    int n, hh=0, mm=0, ss=0, us=0, tz=0;
++    int n, hh=0, mm=0, ss=0, us=0, tzsec=0;
+ 
+     if (str == NULL) { Py_RETURN_NONE; }
+ 
+-    n = typecast_parse_time(str, NULL, &len, &hh, &mm, &ss, &us, &tz);
++    n = typecast_parse_time(str, NULL, &len, &hh, &mm, &ss, &us, &tzsec);
+     Dprintf("typecast_PYTIME_cast: n = %d, len = " FORMAT_CODE_PY_SSIZE_T ", "
+-            "hh = %d, mm = %d, ss = %d, us = %d, tz = %d",
+-            n, len, hh, mm, ss, us, tz);
++            "hh = %d, mm = %d, ss = %d, us = %d, tzsec = %d",
++            n, len, hh, mm, ss, us, tzsec);
+ 
+     if (n < 3 || n > 6) {
+         PyErr_SetString(DataError, "unable to parse time");
+@@ -254,25 +250,25 @@ typecast_PYTIME_cast(const char *str, Py_ssize_t len, PyObject *curs)
+     }
+     tzinfo_factory = ((cursorObject *)curs)->tzinfo_factory;
+     if (n >= 5 && tzinfo_factory != Py_None) {
+-        /* we have a time zone, calculate minutes and create
++        /* we have a time zone, calculate seconds and create
+            appropriate tzinfo object calling the factory */
+-        Dprintf("typecast_PYTIME_cast: UTC offset = %ds", tz);
++        Dprintf("typecast_PYTIME_cast: UTC offset = %ds", tzsec);
+ 
+-        /* The datetime module requires that time zone offsets be
+-           a whole number of minutes, so truncate the seconds to the
+-           closest minute. */
+-        tzinfo = PyObject_CallFunction(tzinfo_factory, "i",
+-            (int)round(tz / 60.0));
++        if (!(tzoff = PyDelta_FromDSU(0, tzsec, 0))) { goto exit; }
++        if (!(tzinfo = PyObject_CallFunctionObjArgs(tzinfo_factory, tzoff, NULL))) {
++            goto exit;
++        }
+     } else {
+         Py_INCREF(Py_None);
+         tzinfo = Py_None;
+     }
+-    if (tzinfo != NULL) {
+-        obj = PyObject_CallFunction((PyObject*)PyDateTimeAPI->TimeType, "iiiiO",
+-                                    hh, mm, ss, us, tzinfo);
+-        Py_DECREF(tzinfo);
+-    }
+-    return obj;
++    rv = PyObject_CallFunction((PyObject*)PyDateTimeAPI->TimeType, "iiiiO",
++                                hh, mm, ss, us, tzinfo);
++
++exit:
++    Py_XDECREF(tzoff);
++    Py_XDECREF(tzinfo);
++    return rv;
+ }
+ 
+ 
+--- a/psycopg/utils.c
++++ b/psycopg/utils.c
+@@ -190,7 +190,7 @@ psyco_ensure_bytes(PyObject *obj)
+ 
+ /* Take a Python object and return text from it.
+  *
+- * On Py3 this means converting bytes to unicode. On Py2 bytes are fine.
++ * This means converting bytes to unicode.
+  *
+  * The function is ref neutral: steals a ref from obj and adds one to the
+  * return value.  It is safe to call it on NULL.
+@@ -198,9 +198,6 @@ psyco_ensure_bytes(PyObject *obj)
+ STEALS(1) PyObject *
+ psyco_ensure_text(PyObject *obj)
+ {
+-#if PY_2
+-    return obj;
+-#else
+     if (obj) {
+         /* bytes to unicode in Py3 */
+         PyObject *rv = PyUnicode_FromEncodedObject(obj, "utf8", "replace");
+@@ -210,7 +207,6 @@ psyco_ensure_text(PyObject *obj)
+     else {
+         return NULL;
+     }
+-#endif
+ }
+ 
+ /* Check if a file derives from TextIOBase.
+@@ -309,24 +305,13 @@ exit:
+ 
+ /* Convert a C string into Python Text using a specified codec.
+  *
+- * The codec is the python function codec.getdecoder(enc). It is only used on
+- * Python 3 to return unicode: in Py2 the function returns a string.
++ * The codec is the python function codec.getdecoder(enc).
+  *
+  * len is optional: use -1 to have it calculated by the function.
+  */
+ PyObject *
+ psyco_text_from_chars_safe(const char *str, Py_ssize_t len, PyObject *decoder)
+ {
+-#if PY_2
+-
+-    if (!str) { Py_RETURN_NONE; }
+-
+-    if (len < 0) { len = strlen(str); }
+-
+-    return PyString_FromStringAndSize(str, len);
+-
+-#else
+-
+     static PyObject *replace = NULL;
+     PyObject *rv = NULL;
+     PyObject *b = NULL;
+@@ -356,8 +341,6 @@ exit:
+     Py_XDECREF(t);
+     Py_XDECREF(b);
+     return rv;
+-
+-#endif
+ }
+ 
+ 
+@@ -409,26 +392,8 @@ psyco_set_error(PyObject *exc, cursorObject *curs, const char *msg)
+ static int
+ psyco_is_main_interp(void)
+ {
+-#if PY_VERSION_HEX >= 0x03080000
+     /* tested with Python 3.8.0a2 */
+     return _PyInterpreterState_Get() == PyInterpreterState_Main();
+-#else
+-    static PyInterpreterState *main_interp = NULL;  /* Cached reference */
+-    PyInterpreterState *interp;
+-
+-    if (main_interp) {
+-        return (main_interp == PyThreadState_Get()->interp);
+-    }
+-
+-    /* No cached value: cache the proper value and try again. */
+-    interp = PyInterpreterState_Head();
+-    while (interp->next)
+-        interp = interp->next;
+-
+-    main_interp = interp;
+-    assert (main_interp);
+-    return psyco_is_main_interp();
+-#endif
+ }
+ 
+ /* psyco_get_decimal_type
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -7,10 +7,6 @@ define=
+ # different name set the following option to the pg_config full path.
+ pg_config=
+ 
+-# If the build system does not find the mx.DateTime headers, try
+-# setting its value to the right path.
+-mx_include_dir=
+-
+ # For Windows only:
+ # Set to 1 if the PostgreSQL library was built with OpenSSL.
+ # Required to link in OpenSSL libraries and dependencies.
+@@ -23,4 +19,4 @@ static_libpq=0
+ libraries=
+ 
+ [metadata]
+-license_file = LICENSE
++license_files = LICENSE
+--- a/setup.py
++++ b/setup.py
+@@ -26,8 +26,6 @@ UPDATEs. psycopg2 also provide full asynchronous operations and support
+ for coroutine libraries.
+ """
+ 
+-# Note: The setup.py must be compatible with both Python 2 and 3
+-
+ 
+ import os
+ import sys
+@@ -35,10 +33,8 @@ import re
+ import subprocess
+ from setuptools import setup, Extension
+ from distutils.command.build_ext import build_ext
+-from distutils.sysconfig import get_python_inc
+ from distutils.ccompiler import get_default_compiler
+ from distutils.errors import CompileError
+-from distutils.util import get_platform
+ 
+ try:
+     import configparser
+@@ -58,14 +54,11 @@ Development Status :: 5 - Production/Stable
+ Intended Audience :: Developers
+ License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)
+ Programming Language :: Python
+-Programming Language :: Python :: 2
+-Programming Language :: Python :: 2.7
+ Programming Language :: Python :: 3
+-Programming Language :: Python :: 3.4
+-Programming Language :: Python :: 3.5
+-Programming Language :: Python :: 3.6
+-Programming Language :: Python :: 3.7
+-Programming Language :: Python :: 3.8
++Programming Language :: Python :: 3.9
++Programming Language :: Python :: 3.10
++Programming Language :: Python :: 3.11
++Programming Language :: Python :: 3 :: Only
+ Programming Language :: Python :: Implementation :: CPython
+ Programming Language :: C
+ Programming Language :: SQL
+@@ -109,24 +102,23 @@ For further information please check the 'doc/src/install.rst' file (also at
+ """)
+             sys.exit(1)
+ 
+-    def query(self, attr_name):
++    def query(self, attr_name, *, empty_ok=False):
+         """Spawn the pg_config executable, querying for the given config
+         name, and return the printed value, sanitized. """
+         try:
+-            pg_config_process = subprocess.Popen(
++            pg_config_process = subprocess.run(
+                 [self.pg_config_exe, "--" + attr_name],
+-                stdin=subprocess.PIPE,
+                 stdout=subprocess.PIPE,
+                 stderr=subprocess.PIPE)
+         except OSError:
+-            raise Warning("Unable to find 'pg_config' file in '%s'" %
+-                          self.pg_config_exe)
+-        pg_config_process.stdin.close()
+-        result = pg_config_process.stdout.readline().strip()
+-        if not result:
+-            raise Warning(pg_config_process.stderr.readline())
+-        if not isinstance(result, str):
+-            result = result.decode('ascii')
++            raise Warning(
++                f"Unable to find 'pg_config' file in '{self.pg_config_exe}'")
++        if pg_config_process.returncode:
++            err = pg_config_process.stderr.decode(errors='backslashreplace')
++            raise Warning(f"pg_config --{attr_name} failed: {err}")
++        result = pg_config_process.stdout.decode().strip()
++        if not result and not empty_ok:
++            raise Warning(f"pg_config --{attr_name} is empty")
+         return result
+ 
+     def find_on_path(self, exename, path_directories=None):
+@@ -175,7 +167,7 @@ For further information please check the 'doc/src/install.rst' file (also at
+         try:
+             pg_inst_list_key = winreg.OpenKey(reg,
+                 'SOFTWARE\\PostgreSQL\\Installations')
+-        except EnvironmentError:
++        except OSError:
+             # No PostgreSQL installation, as best as we can tell.
+             return None
+ 
+@@ -183,7 +175,7 @@ For further information please check the 'doc/src/install.rst' file (also at
+             # Determine the name of the first subkey, if any:
+             try:
+                 first_sub_key_name = winreg.EnumKey(pg_inst_list_key, 0)
+-            except EnvironmentError:
++            except OSError:
+                 return None
+ 
+             pg_first_inst_key = winreg.OpenKey(reg,
+@@ -202,12 +194,6 @@ For further information please check the 'doc/src/install.rst' file (also at
+         if not os.path.exists(pg_config_path):
+             return None
+ 
+-        # Support unicode paths, if this version of Python provides the
+-        # necessary infrastructure:
+-        if sys.version_info[0] < 3:
+-            pg_config_path = pg_config_path.encode(
+-                sys.getfilesystemencoding())
+-
+         return pg_config_path
+ 
+ 
+@@ -242,7 +228,6 @@ class psycopg_build_ext(build_ext):
+     def initialize_options(self):
+         build_ext.initialize_options(self)
+         self.pgdir = None
+-        self.mx_include_dir = None
+         self.have_ssl = have_ssl
+         self.static_libpq = static_libpq
+         self.pg_config = None
+@@ -308,30 +293,6 @@ For further information please check the 'doc/src/install.rst' file (also at
+ """)
+             raise
+ 
+-        sysVer = sys.version_info[:2]
+-
+-        # For Python versions that use MSVC compiler 2008, re-insert the
+-        # manifest into the resulting .pyd file.
+-        if self.compiler_is_msvc() and sysVer == (2, 7):
+-            platform = get_platform()
+-            # Default to the x86 manifest
+-            manifest = '_psycopg.vc9.x86.manifest'
+-            if platform == 'win-amd64':
+-                manifest = '_psycopg.vc9.amd64.manifest'
+-            try:
+-                ext_path = self.get_ext_fullpath(extension.name)
+-            except AttributeError:
+-                ext_path = os.path.join(self.build_lib,
+-                        'psycopg2', '_psycopg.pyd')
+-            # Make sure spawn() will work if compile() was never
+-            # called. https://github.com/psycopg/psycopg2/issues/380
+-            if not self.compiler.initialized:
+-                self.compiler.initialize()
+-            self.compiler.spawn(
+-                ['mt.exe', '-nologo', '-manifest',
+-                 os.path.join('psycopg', manifest),
+-                 '-outputresource:%s;2' % ext_path])
+-
+     def finalize_win32(self):
+         """Finalize build system configuration on win32 platform."""
+ 
+@@ -412,6 +373,18 @@ For further information please check the 'doc/src/install.rst' file (also at
+             self.library_dirs.append(pg_config_helper.query("libdir"))
+             self.include_dirs.append(pg_config_helper.query("includedir"))
+             self.include_dirs.append(pg_config_helper.query("includedir-server"))
++
++            # if present, add includedirs from cppflags, libdirs from ldflags
++            tokens = pg_config_helper.query("ldflags", empty_ok=True).split()
++            for token in tokens:
++                if token.startswith("-L"):
++                    self.library_dirs.append(token[2:])
++
++            tokens = pg_config_helper.query("cppflags", empty_ok=True).split()
++            for token in tokens:
++                if token.startswith("-I"):
++                    self.include_dirs.append(token[2:])
++
+             pgversion = pg_config_helper.query("version").split()[1]
+ 
+             verre = re.compile(
+@@ -431,8 +404,8 @@ For further information please check the 'doc/src/install.rst' file (also at
+                 pgpatch = int(pgpatch)
+             else:
+                 sys.stderr.write(
+-                    "Error: could not determine PostgreSQL version from '%s'"
+-                    % pgversion)
++                    f"Error: could not determine PostgreSQL version from "
++                    f"'{pgversion}'")
+                 sys.exit(1)
+ 
+             define_macros.append(("PG_VERSION_NUM", "%d%02d%02d" %
+@@ -454,7 +427,7 @@ For further information please check the 'doc/src/install.rst' file (also at
+ 
+         except Warning:
+             w = sys.exc_info()[1]  # work around py 2/3 different syntax
+-            sys.stderr.write("Error: %s\n" % w)
++            sys.stderr.write(f"Error: {w}\n")
+             sys.exit(1)
+ 
+         if hasattr(self, "finalize_" + sys.platform):
+@@ -524,30 +497,12 @@ depends = [
+ parser = configparser.ConfigParser()
+ parser.read('setup.cfg')
+ 
+-# check for mx package
+-mxincludedir = ''
+-if parser.has_option('build_ext', 'mx_include_dir'):
+-    mxincludedir = parser.get('build_ext', 'mx_include_dir')
+-if not mxincludedir:
+-    # look for mxDateTime.h; prefer one located in venv
+-    candidate_dirs = [os.path.join(d, 'mx', 'DateTime', 'mxDateTime') for d in sys.path] \
+-                   + [os.path.join(get_python_inc(plat_specific=1), "mx")]
+-    candidate_dirs = [d for d in candidate_dirs if os.path.exists(os.path.join(d, 'mxDateTime.h'))] or ['']
+-    mxincludedir = candidate_dirs[0]
+-if mxincludedir.strip() and os.path.exists(mxincludedir):
+-    # Build the support for mx: we will check at runtime if it can be imported
+-    include_dirs.append(mxincludedir)
+-    define_macros.append(('HAVE_MXDATETIME', '1'))
+-    sources.append('adapter_mxdatetime.c')
+-    depends.extend(['adapter_mxdatetime.h', 'typecast_mxdatetime.c'])
+-    version_flags.append('mx')
+-
+ # generate a nice version string to avoid confusion when users report bugs
+ version_flags.append('pq3')     # no more a choice
+ version_flags.append('ext')     # no more a choice
+ 
+ if version_flags:
+-    PSYCOPG_VERSION_EX = PSYCOPG_VERSION + " (%s)" % ' '.join(version_flags)
++    PSYCOPG_VERSION_EX = PSYCOPG_VERSION + f" ({' '.join(version_flags)})"
+ else:
+     PSYCOPG_VERSION_EX = PSYCOPG_VERSION
+ 
+@@ -599,7 +554,7 @@ setup(name="psycopg2",
+       url="https://psycopg.org/",
+       license="LGPL with exceptions",
+       platforms=["any"],
+-      python_requires='>=2.7,!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*',
++      python_requires='>=3.9',
+       description=readme.split("\n")[0],
+       long_description="\n".join(readme.split("\n")[2:]).lstrip(),
+       classifiers=[x for x in classifiers.split("\n") if x],

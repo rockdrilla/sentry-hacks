@@ -1,0 +1,29 @@
+--- a/setup.py
++++ b/setup.py
+@@ -156,8 +156,6 @@ class build_ext(build_ext_orig):
+             ext.extra_compile_args.append('-Wall')
+             ext.extra_compile_args.append('-O0')
+             ext.define_macros.append(('PYXMLSEC_ENABLE_DEBUG', '1'))
+-        else:
+-            ext.extra_compile_args.append('-Os')
+ 
+         super(build_ext, self).run()
+ 
+@@ -491,7 +489,7 @@ class build_ext(build_ext_orig):
+ src_root = Path(__file__).parent / 'src'
+ sources = [str(p.absolute()) for p in src_root.rglob('*.c')]
+ pyxmlsec = Extension('xmlsec', sources=sources)
+-setup_reqs = ['setuptools_scm[toml]>=3.4', 'pkgconfig>=1.5.1', 'lxml>=3.8']
++setup_reqs = ['pkgconfig>=1.5.1', 'lxml>=3.8']
+ 
+ 
+ with io.open('README.rst', encoding='utf-8') as f:
+@@ -500,7 +498,7 @@ with io.open('README.rst', encoding='utf-8') as f:
+ 
+ setup(
+     name='xmlsec',
+-    use_scm_version=True,
++    version='1.3.13',
+     description='Python bindings for the XML Security Library',
+     long_description=long_desc,
+     ext_modules=[pyxmlsec],

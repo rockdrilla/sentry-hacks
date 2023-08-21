@@ -1,0 +1,73 @@
+--- a/scripts/lib.sh
++++ b/scripts/lib.sh
+@@ -124,13 +124,11 @@ install-py-dev() {
+     # Webpacked assets are only necessary for devserver (which does it lazily anyways)
+     # and acceptance tests, which webpack automatically if run.
+     SENTRY_LIGHT_BUILD=1 pip install -e '.[dev]'
+-    patch-selenium
+ }
+ 
+ patch-selenium() {
+     # XXX: getsentry repo calls this!
+-    # This hack is until we can upgrade to a newer version of Selenium
+-    python -S -m tools.patch_selenium
++    :
+ }
+ 
+ setup-git-config() {
+--- a/setup.py
++++ b/setup.py
+@@ -87,7 +87,7 @@ def get_requirements(env):
+ # Only include dev requirements in non-binary distributions as we don't want these
+ # to be listed in the wheels. Main reason for this is being able to use git/URL dependencies
+ # for development, which will be rejected by PyPI when trying to upload the wheel.
+-extras_require = {"rabbitmq": ["amqp==2.6.1"]}
++extras_require = {"rabbitmq": ["amqp==5.0.9"]}
+ if not sys.argv[1:][0].startswith("bdist"):
+     extras_require["dev"] = get_requirements("dev")
+ 
+--- a/src/sentry/testutils/helpers/query.py
++++ b/src/sentry/testutils/helpers/query.py
+@@ -12,14 +12,15 @@ def parse_queries(captured_queries):
+     for query in captured_queries:
+         raw_sql = query["sql"]
+         parsed = sqlparse.parse(raw_sql)
+-        for token in parsed[0].tokens:
++        for token_index, token in enumerate(parsed[0].tokens):
+             if token.ttype is DML:
+                 if token.value.upper() in write_ops:
+-                    table_name = parsed[0].get_real_name()
+-                    if parsed[0].get_real_name() == "*":  # DELETE * FROM ...
+-                        table_name = parsed[0].get_name()
+-                    if real_queries.get(table_name) is None:
+-                        real_queries[table_name] = 0
+-                    real_queries[table_name] += 1
++                    for t in parsed[0].tokens[token_index + 1 :]:
++                        if isinstance(t, sqlparse.sql.Identifier):
++                            table_name = t.get_real_name()
++                            if real_queries.get(table_name) is None:
++                                real_queries[table_name] = 0
++                            real_queries[table_name] += 1
++                            break
+ 
+     return real_queries
+--- a/src/sentry/utils/codecs.py
++++ b/src/sentry/utils/codecs.py
+@@ -1,6 +1,6 @@
+ import zlib
+ from abc import ABC, abstractmethod
+-from typing import Generic, TypeVar, cast
++from typing import Generic, TypeVar
+ 
+ import zstandard
+ 
+@@ -88,7 +88,7 @@ class ZlibCodec(Codec[bytes, bytes]):
+ 
+ class ZstdCodec(Codec[bytes, bytes]):
+     def encode(self, value: bytes) -> bytes:
+-        return cast(bytes, zstandard.ZstdCompressor().compress(value))
++        return zstandard.ZstdCompressor().compress(value)
+ 
+     def decode(self, value: bytes) -> bytes:
+-        return cast(bytes, zstandard.ZstdDecompressor().decompress(value))
++        return zstandard.ZstdDecompressor().decompress(value)

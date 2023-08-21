@@ -25,3 +25,11 @@ SENTRY_RELEASE=22.6.0
 : "${SENTRY_ARROYO_REPO_URI:=https://github.com/getsentry/arroyo}"
 : "${SENTRY_ARROYO_GITREF:=0.1.1}"
 : "${SENTRY_ARROYO_URI:=${SENTRY_ARROYO_REPO_URI}/archive/${SENTRY_ARROYO_GITREF}.tar.gz}"
+
+: "${PYTHON_XMLSEC_REPO_URI:=https://github.com/xmlsec/python-xmlsec}"
+: "${PYTHON_XMLSEC_GITREF:=156394743a0c712e6638fe6e7e300c2f24b4fb12}"
+: "${PYTHON_XMLSEC_URI:=${PYTHON_XMLSEC_REPO_URI}/archive/${PYTHON_XMLSEC_GITREF}.tar.gz}"
+
+: "${PSYCOPG2_REPO_URI:=https://github.com/psycopg/psycopg2}"
+: "${PSYCOPG2_GITREF:=359679b13606de45931cd4b4ccb1db20a1c339f1}"
+: "${PSYCOPG2_URI:=${PSYCOPG2_REPO_URI}/archive/${PSYCOPG2_GITREF}.tar.gz}"
