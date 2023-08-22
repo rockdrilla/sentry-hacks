@@ -1509,15 +1509,7 @@
      def select_related(self, *fields):
 --- a/django/db/models/sql/compiler.py
 +++ b/django/db/models/sql/compiler.py
-@@ -131,6 +131,7 @@ class SQLCompiler:
- 
-         for expr in expressions:
-             sql, params = self.compile(expr)
-+            sql, params = expr.select_format(self, sql, params)
-             if isinstance(expr, Subquery) and not sql.startswith('('):
-                 # Subquery expression from HAVING clause may not contain
-                 # wrapping () because they could be removed when a subquery is
-@@ -180,7 +181,11 @@ class SQLCompiler:
+@@ -180,7 +180,11 @@ class SQLCompiler:
              # database views on which the optimization might not be allowed.
              pks = {
                  expr for expr in expressions
@@ -1530,7 +1522,7 @@
              }
              aliases = {expr.alias for expr in pks}
              expressions = [
-@@ -525,19 +530,26 @@ class SQLCompiler:
+@@ -525,19 +529,26 @@ class SQLCompiler:
                      nowait = self.query.select_for_update_nowait
                      skip_locked = self.query.select_for_update_skip_locked
                      of = self.query.select_for_update_of
@@ -1875,6 +1867,37 @@
          return False
  
  
+--- a/django/utils/regex_helper.py
++++ b/django/utils/regex_helper.py
+@@ -5,6 +5,10 @@ Used internally by Django and not intended for external use.
+ This is not, and is not intended to be, a complete reg-exp decompiler. It
+ should be good enough for a large class of URLS, however.
+ """
++import re
++
++from django.utils.functional import SimpleLazyObject
++
+ # Mapping of an escape character to a representative of that class. So, e.g.,
+ # "\w" is replaced by "x" in a reverse URL. A value of None means to ignore
+ # this sequence. Any missing key is mapped to itself.
+@@ -331,3 +335,17 @@ def flatten_result(source):
+         for i in range(len(result)):
+             result[i] += piece
+     return result, result_args
++
++
++def _lazy_re_compile(regex, flags=0):
++    """Lazily compile a regex with flags."""
++    def _compile():
++        # Compile the regex if it was not passed pre-compiled.
++        if isinstance(regex, (str, bytes)):
++            return re.compile(regex, flags)
++        else:
++            assert not flags, (
++                'flags must be empty if regex is passed pre-compiled'
++            )
++            return regex
++    return SimpleLazyObject(_compile)
 --- a/django/utils/translation/trans_real.py
 +++ b/django/utils/translation/trans_real.py
 @@ -29,6 +29,11 @@ _default = None
