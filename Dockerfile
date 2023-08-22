@@ -148,6 +148,9 @@ ENV DEB_CFLAGS_STRIP="${_CFLAGS_STRIP}" \
     DEB_CFLAGS_PREPEND="${_CFLAGS_PREPEND}" \
     DEB_CFLAGS_PREPEND="${_CFLAGS_PREPEND}"
 
+RUN quiet apt-install binutils ; \
+    cleanup
+
 # hack the python!
 
 RUN grep -ZFRl -e fstack-protector-strong $(python-config --prefix)/ \
@@ -169,6 +172,10 @@ RUN cd / ; \
     done ; \
     grep -ZFRl -e ' -O2 ' $(python-config --prefix)/ \
     | xargs -0r sed -i -e "s#-g -O2 #${_CFLAGS_PREPEND} #g"
+
+RUN apt-wrap-python \
+      pip install -v 'cython>=0.29,<3.0.0' ; \
+    cleanup
 
 ## finish layer
 RUN cleanup ; \
@@ -218,8 +225,7 @@ RUN mkdir /tmp/uwsgi-dogstatsd /tmp/uwsgi-dogstatsd.build ; \
     uwsgi --need-plugin=./dogstatsd --help > /dev/null
 
 ## finish layer
-RUN quiet apt-install binutils ; \
-    ufind -z /app /usr/local "${SITE_PACKAGES}" | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+RUN ufind -z /app /usr/local "${SITE_PACKAGES}" | xvp is-elf -z - | sort -zV > /tmp/elves ; \
     xvp ls -lrS /tmp/elves ; \
     xvp strip --strip-debug /tmp/elves ; echo ; \
     xvp ls -lrS /tmp/elves ; \
@@ -274,8 +280,7 @@ RUN apt-list-installed > apt.deps.1 ; \
     rm -f apt.deps.0 apt.deps.1
 
 ## finish layer
-RUN quiet apt-install binutils ; \
-    ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
     xvp ls -lrS /tmp/elves ; \
     xvp strip --strip-debug /tmp/elves ; echo ; \
     xvp ls -lrS /tmp/elves ; \
@@ -286,7 +291,12 @@ RUN quiet apt-install binutils ; \
 FROM ${BUILDER_INTERIM_IMAGE} as sentry-deps
 SHELL [ "/bin/sh", "-ec" ]
 
-ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
+ENV GRPC_PYTHON_DISABLE_LIBC_COMPATIBILITY=1
+ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
+ENV GRPC_PYTHON_BUILD_WITH_CYTHON=1
+## Debian 12 Bookworm libre2 is newer than in grpcio (1.57.0)
+ENV GRPC_PYTHON_BUILD_SYSTEM_RE2=1
+ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libre2-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
 ENV BUILD_FROM_SRC='cffi,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,psycopg2,python-rapidjson,pyyaml,regex,simplejson,zstandard'
 
 ARG UWSGI_INTERIM_IMAGE
@@ -338,8 +348,7 @@ RUN apt-list-installed > apt.deps.1 ; \
     rm -f apt.deps.0 apt.deps.1
 
 ## finish layer
-RUN quiet apt-install binutils ; \
-    ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
     xvp ls -lrS /tmp/elves ; \
     xvp strip --strip-debug /tmp/elves ; echo ; \
     xvp ls -lrS /tmp/elves ; \
@@ -453,8 +462,7 @@ RUN apt-list-installed > apt.deps.1 ; \
     rm -f apt.deps.0 apt.deps.1
 
 ## finish layer
-RUN quiet apt-install binutils ; \
-    ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
     xvp ls -lrS /tmp/elves ; \
     xvp strip --strip-debug /tmp/elves ; echo ; \
     xvp ls -lrS /tmp/elves ; \
