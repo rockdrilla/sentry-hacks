@@ -1,3 +1,48 @@
+--- a/src/sentry/api/event_search.py
++++ b/src/sentry/api/event_search.py
+@@ -6,7 +6,7 @@ from typing import Any, List, Mapping, NamedTuple, Sequence, Set, Tuple, Union
+ 
+ from django.utils.functional import cached_property
+ from parsimonious.exceptions import IncompleteParseError
+-from parsimonious.expressions import Optional
++from parsimonious.expressions import Quantifier
+ from parsimonious.grammar import Grammar, NodeVisitor
+ from parsimonious.nodes import Node
+ 
+@@ -247,9 +247,23 @@ def flatten(children):
+     return children
+ 
+ 
++def is_optional_qualifier(x):
++    if not isinstance(x, Quantifier):
++        return False
++    if not isinstance(x.max, int):
++        return False
++    return (x.min == 0) and (x.max == 1)
++
++
++def is_optional(x):
++    if not isinstance(x, Node):
++        return False
++    return is_optional_qualifier(x.expr)
++
++
+ def remove_optional_nodes(children):
+     def is_not_optional(child):
+-        return not (isinstance(child, Node) and isinstance(child.expr, Optional))
++        return not is_optional(child)
+ 
+     return filter(is_not_optional, children)
+ 
+@@ -290,7 +304,7 @@ def handle_negation(negation, operator):
+ 
+ def get_operator_value(operator):
+     if isinstance(operator, Node):
+-        operator = "=" if isinstance(operator.expr, Optional) else operator.text
++        operator = "=" if is_optional_qualifier(operator.expr) else operator.text
+     elif isinstance(operator, list):
+         operator = operator[0]
+     return operator
 --- a/src/sentry/testutils/helpers/query.py
 +++ b/src/sentry/testutils/helpers/query.py
 @@ -12,14 +12,15 @@ def parse_queries(captured_queries):
