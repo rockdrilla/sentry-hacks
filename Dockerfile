@@ -428,6 +428,13 @@ RUN if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
     set -xv ; \
     sentry --version
 
+## finish layer
+RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+    xvp ls -lrS /tmp/elves ; \
+    xvp strip --strip-debug /tmp/elves ; echo ; \
+    xvp ls -lrS /tmp/elves ; \
+    cleanup
+
 ## ---
 
 FROM ${BUILDER_INTERIM_IMAGE} as snuba-deps
@@ -478,7 +485,7 @@ RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elv
 
 ## ---
 
-FROM ${IMAGE_PATH}/${STAGE_IMAGE} as snuba-aldente
+FROM ${BUILDER_INTERIM_IMAGE} as snuba-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
 ARG SNUBA_DEPS_INTERIM_IMAGE
@@ -508,6 +515,13 @@ RUN pip -v install --no-deps -e . ; \
     ## smoke/qa
     set -xv ; \
     snuba --version
+
+## finish layer
+RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
+    xvp ls -lrS /tmp/elves ; \
+    xvp strip --strip-debug /tmp/elves ; echo ; \
+    xvp ls -lrS /tmp/elves ; \
+    cleanup
 
 ## ---
 
