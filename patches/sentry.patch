@@ -43,3 +43,20 @@
      def decode(self, value: bytes) -> bytes:
 -        return cast(bytes, zstandard.ZstdDecompressor().decompress(value))
 +        return zstandard.ZstdDecompressor().decompress(value)
+--- a/src/sentry/utils/json.py
++++ b/src/sentry/utils/json.py
+@@ -57,11 +57,11 @@ class JSONEncoderForHTML(JSONEncoder):
+     def encode(self, o):
+         # Override JSONEncoder.encode because it has hacks for
+         # performance that make things more complicated.
+-        chunks = self.iterencode(o, True)
++        chunks = self.iterencode(o)
+         return "".join(chunks)
+ 
+-    def iterencode(self, o, _one_shot=False):
+-        chunks = super().iterencode(o, _one_shot)
++    def iterencode(self, o):
++        chunks = super().iterencode(o)
+         for chunk in chunks:
+             chunk = chunk.replace("&", "\\u0026")
+             chunk = chunk.replace("<", "\\u003c")
