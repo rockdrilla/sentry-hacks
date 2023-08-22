@@ -22,7 +22,6 @@ ARG SENTRY_GITREF
 COPY /sentry/  /app/sentry/
 
 COPY /patches/sentry-build.patch  /app/
-COPY /patches/sentry.patch        /app/
 
 ## repack sentry tarball
 RUN mkdir /tmp/sentry ; \
@@ -133,31 +132,6 @@ RUN mkdir /tmp/python-xmlsec ; \
     ## save tarball
     tar -cf - . | gzip -9 > /app/python-xmlsec.tar.gz ; \
     ls -l /run/artifacts/python-xmlsec-${PYTHON_XMLSEC_GITREF}.tar.gz /app/python-xmlsec.tar.gz ; \
-    cd / ; \
-    cleanup
-
-## ---
-
-FROM ${IMAGE_PATH}/${HELPER_IMAGE} as psycopg2-prepare
-SHELL [ "/bin/sh", "-ec" ]
-
-ARG PSYCOPG2_GITREF
-
-COPY /patches/psycopg2.patch  /app/
-
-## repack psycopg2 tarball
-RUN mkdir /tmp/psycopg2 ; \
-    cd /tmp/psycopg2 ; \
-    tar --strip-components=1 -xf /run/artifacts/psycopg2-${PSYCOPG2_GITREF}.tar.gz ; \
-    ## remove unused things
-    rm -rf tests ; \
-    ## apply patch
-    patch -p1 < /app/psycopg2.patch ; \
-    rm lib/_lru_cache.py lib/compat.py psycopg/adapter_mxdatetime.c \
-       psycopg/adapter_mxdatetime.h psycopg/typecast_mxdatetime.c ; \
-    ## save tarball
-    tar -cf - . | gzip -9 > /app/psycopg2.tar.gz ; \
-    ls -l /run/artifacts/psycopg2-${PSYCOPG2_GITREF}.tar.gz /app/psycopg2.tar.gz ; \
     cd / ; \
     cleanup
 
@@ -313,7 +287,7 @@ FROM ${BUILDER_INTERIM_IMAGE} as sentry-deps
 SHELL [ "/bin/sh", "-ec" ]
 
 ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
-ENV BUILD_FROM_SRC='cffi,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,python-rapidjson,pyyaml,regex,simplejson,zstandard'
+ENV BUILD_FROM_SRC='cffi,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,psycopg2,python-rapidjson,pyyaml,regex,simplejson,zstandard'
 
 ARG UWSGI_INTERIM_IMAGE
 ARG LIBRDKAFKA_INTERIM_IMAGE
@@ -329,7 +303,6 @@ COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
 COPY --from=xmlsec-prepare    /app/python-xmlsec.tar.gz  /app/
-COPY --from=psycopg2-prepare  /app/psycopg2.tar.gz       /app/
 
 COPY /sentry/  /tmp/sentry/
 
@@ -344,11 +317,6 @@ RUN cat apt.deps.uwsgi apt.deps.librdkafka \
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
       pip -v install --no-binary "${BUILD_FROM_SRC}" ./python-xmlsec.tar.gz ; \
     rm python-xmlsec.tar.gz
-
-## install psycopg2
-RUN apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install --no-binary "${BUILD_FROM_SRC}" ./psycopg2.tar.gz ; \
-    rm psycopg2.tar.gz
 
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
       pip -v install --no-binary "${BUILD_FROM_SRC}" -r /tmp/sentry/requirements-base.txt ; \
@@ -394,7 +362,9 @@ COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
 COPY --from=sentry-prepare  /app/sentry.tar.gz  /app/
-COPY --from=sentry-prepare  /app/sentry.patch   /app/
+
+COPY /patches/sentry.patch  /app/
+COPY /patches/django.patch  /app/
 
 WORKDIR /app
 
@@ -431,6 +401,11 @@ RUN xargs -r -a apt.deps apt-install ; \
     pip -v install --no-deps "${SENTRY_WHEEL}" ; \
     cd /app ; \
     cleanup ; \
+    ## hack django
+    cd ${SITE_PACKAGES} ; \
+    patch -p1 < /app/django.patch ; \
+    rm /app/django.patch ; \
+    cd /app ; \
     # recompile python cache
     python -m compileall -q ${SITE_PACKAGES} ; \
     ## smoke/qa
