@@ -297,7 +297,7 @@ ENV GRPC_PYTHON_BUILD_WITH_CYTHON=1
 ## Debian 12 Bookworm libre2 is newer than in grpcio (1.57.0)
 ENV GRPC_PYTHON_BUILD_SYSTEM_RE2=1
 ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libre2-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
-ENV BUILD_FROM_SRC='cffi,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,psycopg2,python-rapidjson,pyyaml,regex,simplejson,zstandard'
+ENV BUILD_FROM_SRC='cffi,charset-normalizer,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,psycopg2,python-rapidjson,pyyaml,regex,simplejson,zstandard'
 
 ARG UWSGI_INTERIM_IMAGE
 ARG LIBRDKAFKA_INTERIM_IMAGE
@@ -314,8 +314,6 @@ COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
 COPY --from=xmlsec-prepare    /app/python-xmlsec.tar.gz  /app/
 
-COPY /sentry/  /tmp/sentry/
-
 WORKDIR /app
 
 RUN cat apt.deps.uwsgi apt.deps.librdkafka \
@@ -328,24 +326,20 @@ RUN apt-wrap-python -d "${BUILD_DEPS}" \
       pip -v install --no-binary "${BUILD_FROM_SRC}" ./python-xmlsec.tar.gz ; \
     rm python-xmlsec.tar.gz
 
+COPY /sentry/  /tmp/sentry/
+
+## install remaining (binary) dependencies
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install --no-binary "${BUILD_FROM_SRC}" -r /tmp/sentry/requirements-base.txt ; \
+      pip -v install --no-binary "${BUILD_FROM_SRC}" -r /tmp/sentry/requirements-binary.txt ; \
     cleanup ; \
-    # monkey patch python-memcached
-    sed -i \
-      -e "s/if key is ''/if key == ''/" \
-      -e "s/if key_extra_len is 0/if key_extra_len == 0/" \
-    ${SITE_PACKAGES}/memcache.py ; \
-    # recompile python cache
-    python -m compileall -q ${SITE_PACKAGES} ; \
-    # smoke/qa
+    ## smoke/qa
     python -c 'import maxminddb.extension; maxminddb.extension.Reader'
 
 RUN apt-list-installed > apt.deps.1 ; \
     cat apt.deps.uwsgi apt.deps.librdkafka | sort -uV > apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
-    rm -f apt.deps.0 apt.deps.1
+    rm -f apt.deps.*
 
 ## finish layer
 RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
@@ -356,7 +350,7 @@ RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elv
 
 ## ---
 
-FROM ${IMAGE_PATH}/${STAGE_IMAGE} as sentry-aldente
+FROM ${BUILDER_INTERIM_IMAGE} as sentry-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
 ARG SENTRY_DEPS_INTERIM_IMAGE
@@ -365,7 +359,7 @@ ARG SENTRY_RELEASE
 ENV SENTRY_BUILD=krd.1
 ENV SENTRY_WHEEL="sentry-${SENTRY_RELEASE}-py311-none-any.whl"
 
-## copy uwsgi and dependencies
+## copy binary dependencies
 COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
@@ -377,11 +371,31 @@ COPY /patches/django.patch  /app/
 
 WORKDIR /app
 
-## install sentry as wheel
+## install remaining dependencies
 RUN xargs -r -a apt.deps apt-install ; \
+    quiet apt-install patch ; \
     ldconfig ; \
     tar -xf sentry.tar.gz ; \
-    if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
+    pip -v install -r requirements-base.txt ; \
+    cleanup ; \
+    ## hack packages!
+    cd ${SITE_PACKAGES} ; \
+    # monkey patch python-memcached
+    sed -i \
+      -e "s/if key is ''/if key == ''/" \
+      -e "s/if key_extra_len is 0/if key_extra_len == 0/" \
+    memcache.py ; \
+    ## hack django
+    patch -p1 < /app/django.patch ; \
+    rm /app/django.patch ; \
+    ## hack parsimonious
+    rm -rf parsimonious/tests/ ; \
+    # recompile python cache
+    cd /app ; \
+    python -m compileall -q ${SITE_PACKAGES}
+
+## install sentry as wheel
+RUN if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
         mkdir -p /tmp/sentry-build ; \
         cd /tmp/sentry-build ; \
         tar -xf /app/sentry.tar.gz ; \
@@ -391,14 +405,12 @@ RUN xargs -r -a apt.deps apt-install ; \
             python setup.py bdist_wheel' ; \
         find dist/ -name '*.whl' -type f -exec cp -nvt /run/artifacts {} + ; \
         cd /app ; \
-        cleanup ; \
         ## cleanup after yarn
         rm -rf /usr/local/share/.cache ; \
+        cleanup ; \
     fi ; \
     rm sentry.tar.gz ; \
-    rm apt.deps.* || : ; \
     ## hack wheel
-    quiet apt-install patch ; \
     cd /tmp ; \
     wheel unpack /run/artifacts/${SENTRY_WHEEL} ; \
     cd sentry-${SENTRY_RELEASE} ; \
@@ -410,12 +422,7 @@ RUN xargs -r -a apt.deps apt-install ; \
     pip -v install --no-deps "${SENTRY_WHEEL}" ; \
     cd /app ; \
     cleanup ; \
-    ## hack django
-    cd ${SITE_PACKAGES} ; \
-    patch -p1 < /app/django.patch ; \
-    rm /app/django.patch ; \
-    cd /app ; \
-    # recompile python cache
+    ## recompile python cache
     python -m compileall -q ${SITE_PACKAGES} ; \
     ## smoke/qa
     set -xv ; \
@@ -442,8 +449,6 @@ COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-COPY /snuba/  /tmp/snuba/
-
 WORKDIR /app
 
 RUN cat apt.deps.uwsgi apt.deps.librdkafka \
@@ -451,15 +456,18 @@ RUN cat apt.deps.uwsgi apt.deps.librdkafka \
     ldconfig ; \
     apt-list-installed > apt.deps.0
 
+COPY /snuba/  /tmp/snuba/
+
+## install (binary) dependencies
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install --no-binary "${BUILD_FROM_SRC}" -r /tmp/snuba/requirements.txt ; \
+      pip -v install --no-binary "${BUILD_FROM_SRC}" -r /tmp/snuba/requirements-binary.txt ; \
     cleanup
 
 RUN apt-list-installed > apt.deps.1 ; \
     cat apt.deps.uwsgi apt.deps.librdkafka | sort -uV > apt.deps ; \
     set +e ; \
     grep -Fvx -f apt.deps.0 apt.deps.1 >> apt.deps ; \
-    rm -f apt.deps.0 apt.deps.1
+    rm -f apt.deps.*
 
 ## finish layer
 RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elves ; \
@@ -475,7 +483,7 @@ SHELL [ "/bin/sh", "-ec" ]
 
 ARG SNUBA_DEPS_INTERIM_IMAGE
 
-## copy uwsgi and dependencies
+## copy binary dependencies
 COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
@@ -484,14 +492,16 @@ COPY --from=snuba-prepare  /app/snuba.tar.gz  /app/
 
 WORKDIR /app
 
-## install snuba "in-place"
+## install remaining dependencies
 RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     tar -xf snuba.tar.gz ; \
     rm snuba.tar.gz ; \
-    rm apt.deps.* || : ; \
-    pip -v install --no-deps -e . ; \
-    cleanup ; \
+    pip -v install -r requirements.txt ; \
+    cleanup
+
+## install snuba "in-place"
+RUN pip -v install --no-deps -e . ; \
     python -m compileall -q . ; \
     ## adjust permissions
     chmod -R go-w /app ; \
