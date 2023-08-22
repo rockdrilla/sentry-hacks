@@ -19,8 +19,10 @@ SHELL [ "/bin/sh", "-ec" ]
 
 ARG SENTRY_GITREF
 
-COPY /sentry/               /app/sentry/
-COPY /patches/sentry.patch  /app/
+COPY /sentry/  /app/sentry/
+
+COPY /patches/sentry-build.patch  /app/
+COPY /patches/sentry.patch        /app/
 
 ## repack sentry tarball
 RUN mkdir /tmp/sentry ; \
@@ -31,7 +33,7 @@ RUN mkdir /tmp/sentry ; \
     ## replace with local changes
     tar -C /app/sentry -cf - . | tar -xf - ; \
     ## apply patch
-    patch -p1 < /app/sentry.patch ; \
+    patch -p1 < /app/sentry-build.patch ; \
     ## save tarball
     tar -cf - . | gzip -9 > /app/sentry.tar.gz ; \
     ls -l /run/artifacts/sentry-${SENTRY_GITREF}.tar.gz /app/sentry.tar.gz ; \
@@ -384,7 +386,7 @@ ARG SENTRY_DEPS_INTERIM_IMAGE
 ARG SENTRY_RELEASE
 
 ENV SENTRY_BUILD=krd.1
-ENV SENTRY_WHEEL="/run/artifacts/sentry-${SENTRY_RELEASE}-py311-none-any.whl"
+ENV SENTRY_WHEEL="sentry-${SENTRY_RELEASE}-py311-none-any.whl"
 
 ## copy uwsgi and dependencies
 COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /app/              /app/
@@ -392,6 +394,7 @@ COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
 COPY --from=sentry-prepare  /app/sentry.tar.gz  /app/
+COPY --from=sentry-prepare  /app/sentry.patch   /app/
 
 WORKDIR /app
 
@@ -399,7 +402,7 @@ WORKDIR /app
 RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     tar -xf sentry.tar.gz ; \
-    if ! [ -s "${SENTRY_WHEEL}" ] ; then \
+    if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
         mkdir -p /tmp/sentry-build ; \
         cd /tmp/sentry-build ; \
         tar -xf /app/sentry.tar.gz ; \
@@ -415,7 +418,19 @@ RUN xargs -r -a apt.deps apt-install ; \
     fi ; \
     rm sentry.tar.gz ; \
     rm apt.deps.* || : ; \
+    ## hack wheel
+    quiet apt-install patch ; \
+    cd /tmp ; \
+    wheel unpack /run/artifacts/${SENTRY_WHEEL} ; \
+    cd sentry-${SENTRY_RELEASE} ; \
+    patch -p2 < /app/sentry.patch ; \
+    rm /app/sentry.patch ; \
+    cd /tmp ; \
+    wheel pack sentry-${SENTRY_RELEASE} ; \
+    ## install new wheel
     pip -v install --no-deps "${SENTRY_WHEEL}" ; \
+    cd /app ; \
+    cleanup ; \
     # recompile python cache
     python -m compileall -q ${SITE_PACKAGES} ; \
     ## smoke/qa
