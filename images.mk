@@ -17,10 +17,18 @@ IMAGES = $(FINAL_IMAGES) $(addprefix interim-,$(strip $(INTERIM_IMAGES)))
 images: $(addprefix image-,$(strip $(IMAGES)))
 
 ## explicit ordering
-image-interim-uwsgi: image-interim-builder
-image-interim-librdkafka: image-interim-builder
-image-interim-sentry-deps: image-interim-builder image-interim-uwsgi image-interim-librdkafka
-image-interim-snuba-deps:  image-interim-builder image-interim-uwsgi image-interim-librdkafka
+image-interim-uwsgi: \
+  $(addprefix tarball-,uwsgi uwsgi-dogstatsd) \
+  image-interim-builder
+image-interim-librdkafka: \
+  $(addprefix tarball-,librdkafka sentry-arroyo) \
+  image-interim-builder
+image-interim-sentry-deps: \
+  $(addprefix tarball-,sentry python-xmlsec) \
+  $(addprefix image-interim-,builder uwsgi librdkafka)
+image-interim-snuba-deps: \
+  $(addprefix tarball-,snuba) \
+  $(addprefix image-interim-,builder uwsgi librdkafka)
 
 $(eval $(call final_image_target , sentry , , $(call image_name , sentry , ) ))
 $(eval $(call final_image_target , snuba  , , $(call image_name , snuba , ) ))
