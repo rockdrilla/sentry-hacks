@@ -296,6 +296,7 @@ ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
 ENV GRPC_PYTHON_BUILD_WITH_CYTHON=1
 ## Debian 12 Bookworm libre2 is newer than in grpcio (1.57.0)
 ENV GRPC_PYTHON_BUILD_SYSTEM_RE2=1
+ENV PYXMLSEC_OPTIMIZE_SIZE=0
 ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libre2-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
 ENV BUILD_FROM_SRC='cffi,charset-normalizer,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,psycopg2,python-rapidjson,pyyaml,regex,simplejson,zstandard'
 

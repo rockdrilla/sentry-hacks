@@ -1,15 +1,36 @@
 --- a/setup.py
 +++ b/setup.py
-@@ -156,8 +156,6 @@ class build_ext(build_ext_orig):
-             ext.extra_compile_args.append('-Wall')
-             ext.extra_compile_args.append('-O0')
+@@ -86,6 +86,7 @@ class build_ext(build_ext_orig):
+         ext = self.ext_map['xmlsec']
+         self.debug = os.environ.get('PYXMLSEC_ENABLE_DEBUG', False)
+         self.static = os.environ.get('PYXMLSEC_STATIC_DEPS', False)
++        self.size_opt = os.environ.get('PYXMLSEC_OPTIMIZE_SIZE', True)
+ 
+         if self.static or sys.platform == 'win32':
+             self.info('starting static build on {}'.format(sys.platform))
+@@ -153,11 +154,18 @@ class build_ext(build_ext_orig):
+             )
+ 
+         if self.debug:
+-            ext.extra_compile_args.append('-Wall')
+-            ext.extra_compile_args.append('-O0')
              ext.define_macros.append(('PYXMLSEC_ENABLE_DEBUG', '1'))
--        else:
++            if sys.platform == 'win32':
++                ext.extra_compile_args.append('/Od')
++            else:
++                ext.extra_compile_args.append('-Wall')
++                ext.extra_compile_args.append('-O0')
+         else:
 -            ext.extra_compile_args.append('-Os')
++            if self.size_opt:
++                if sys.platform == 'win32':
++                    ext.extra_compile_args.append('/Os')
++                else:
++                    ext.extra_compile_args.append('-Os')
  
          super(build_ext, self).run()
  
-@@ -491,7 +489,7 @@ class build_ext(build_ext_orig):
+@@ -491,7 +499,7 @@ class build_ext(build_ext_orig):
  src_root = Path(__file__).parent / 'src'
  sources = [str(p.absolute()) for p in src_root.rglob('*.c')]
  pyxmlsec = Extension('xmlsec', sources=sources)
@@ -18,7 +39,7 @@
  
  
  with io.open('README.rst', encoding='utf-8') as f:
-@@ -500,7 +498,7 @@ with io.open('README.rst', encoding='utf-8') as f:
+@@ -500,7 +508,7 @@ with io.open('README.rst', encoding='utf-8') as f:
  
  setup(
      name='xmlsec',
