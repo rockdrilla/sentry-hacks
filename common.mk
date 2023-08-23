@@ -6,7 +6,7 @@
 
 SHELL       :=/bin/sh
 .SHELLFLAGS :=-ec
-MAKEFLAGS   +=-Rr --no-print-directory
+MAKEFLAGS   +=--no-print-directory
 
 .PHONY: debug-print-env
 debug-print-env:
@@ -55,18 +55,48 @@ tarball_suffix = $(strip $(word 2,$(subst $(strip $(1)),$(space),_$(call tarball
 ## $3 - uri
 tarball_path = $(TARBALL_DIRPATH)$(strip $(1))-$(strip $(2))$(call tarball_suffix , $(2) , $(3) )
 
+%/:
+	mkdir -p '$@'
+
+CURL_OPTS ?= --trace-time --connect-timeout 30 --max-time 240
+
+## must be '$(eval )'-ed
+## $1 - path
+## $2 - uri
+define tarball_target=
+
+## always verify tarball
+.PHONY: $(strip $(1))
+$(strip $(1)): $(dir $(strip $(1)))
+	@f='$(strip $(1))' ; \
+	u='$(strip $(2))' ; \
+	[ -n "$$$$u" ] || { echo "missing uri for $$$$f" >&2 ; exit 1 ; } ; \
+	while [ -e "$$$$f" ] ; do \
+	    [ -s "$$$$f" ] || break ; \
+	    echo "verify: $$$$f" >&2 ; \
+	    tar -tf "$$$$f" >/dev/null || break ; \
+	    exit 0 ; \
+	done ; \
+	! [ -e "$$$$f" ] || rm -v "$$$$f" ; \
+	echo "download: $$$$u" >&2 ; \
+	curl $(CURL_OPTS) -Lo "$$$$f" "$$$$u" ; \
+	tar -tf "$$$$f" >/dev/null
+
+endef
+
 ## must be '$(eval )'-ed
 ## $1 - name
 ## $2 - version/gitref
 ## $3 - uri
-define tarball_target=
+define versioned_tarball_target=
 
-$(call tarball_path , $(1) , $(2) , $(3) ):
-	mkdir -p '$(dir $(call tarball_path , $(1) , $(2) , $(3) ))' ; \
-	curl -Lo '$(call tarball_path , $(1) , $(2) , $(3) )' '$(strip $(3))'
+$(call tarball_target , $(call tarball_path , $(1) , $(2) , $(3) ) , $(3) )
+
+.PHONY: tarball-$(strip $(1))-$(strip $(2))
+tarball-$(strip $(1))-$(strip $(2)): $(call tarball_path , $(1) , $(2) , $(3) )
 
 .PHONY: tarball-$(strip $(1))
-tarball-$(strip $(1)): $(call tarball_path , $(1) , $(2) , $(3) )
+tarball-$(strip $(1)): tarball-$(strip $(1))-$(strip $(2))
 
 endef
 
@@ -110,9 +140,19 @@ fq_image_name = $(call generic_fq_image_name , $(call image_name , $(1) , $(2) )
 ## $2 - build context specifier (e.g. Dockerfile path)
 ## $3 - (relative) image name
 define image_recipe=
-	podman inspect '$(call generic_fq_image_name , $(3) )' > /dev/null || \
-	BUILD_IMAGE_TARGET=$(strip $(1)) \
-	build-image.sh '$(if $(strip $(2)),$(strip $(2)),.)' '$(call generic_fq_image_name , $(3) )'
+	t='$(strip $(1))' ; \
+	c='$(strip $(2))' ; \
+	[ -n "$$$$c" ] || c=. ; \
+	b="'$$$$c'$$$${t:+::'$$$$t'}" ; \
+	i='$(strip $(3))' ; \
+	[ -n "$$$$i" ] || { echo "missing image name for build context $$$$b" >&2 ; exit 1 ; } ; \
+	i='$(call generic_fq_image_name , $(3) )' ; \
+	echo "verify: $$$$i" >&2 ; \
+	if podman inspect "$$$$i" > /dev/null ; then exit 0 ; fi ; \
+	echo "build: $$$$b" >&2 ; \
+	env \
+	$$$${t:+ BUILD_IMAGE_TARGET=$$$$t } \
+	build-image.sh "$$$$c" "$$$$i"
 endef
 
 ## must be '$(eval )'-ed

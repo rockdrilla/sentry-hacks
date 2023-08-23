@@ -48,13 +48,13 @@ TARBALLS = \
 TARBALL_DIR = artifacts
 TARBALL_DIRPATH = $(if $(strip $(TARBALL_DIR)),$(strip $(TARBALL_DIR))/)
 
-$(eval $(call tarball_target , sentry          , $(SENTRY_GITREF)          , $(SENTRY_URI)          ))
-$(eval $(call tarball_target , snuba           , $(SNUBA_GITREF)           , $(SNUBA_URI)           ))
-$(eval $(call tarball_target , uwsgi           , $(UWSGI_GITREF)           , $(UWSGI_URI)           ))
-$(eval $(call tarball_target , uwsgi-dogstatsd , $(UWSGI_DOGSTATSD_GITREF) , $(UWSGI_DOGSTATSD_URI) ))
-$(eval $(call tarball_target , librdkafka      , $(LIBRDKAFKA_GITREF)      , $(LIBRDKAFKA_URI)      ))
-$(eval $(call tarball_target , sentry-arroyo   , $(SENTRY_ARROYO_GITREF)   , $(SENTRY_ARROYO_URI)   ))
-$(eval $(call tarball_target , python-xmlsec   , $(PYTHON_XMLSEC_GITREF)   , $(PYTHON_XMLSEC_URI)   ))
+$(eval $(call versioned_tarball_target , sentry          , $(SENTRY_GITREF)          , $(SENTRY_URI)          ))
+$(eval $(call versioned_tarball_target , snuba           , $(SNUBA_GITREF)           , $(SNUBA_URI)           ))
+$(eval $(call versioned_tarball_target , uwsgi           , $(UWSGI_GITREF)           , $(UWSGI_URI)           ))
+$(eval $(call versioned_tarball_target , uwsgi-dogstatsd , $(UWSGI_DOGSTATSD_GITREF) , $(UWSGI_DOGSTATSD_URI) ))
+$(eval $(call versioned_tarball_target , librdkafka      , $(LIBRDKAFKA_GITREF)      , $(LIBRDKAFKA_URI)      ))
+$(eval $(call versioned_tarball_target , sentry-arroyo   , $(SENTRY_ARROYO_GITREF)   , $(SENTRY_ARROYO_URI)   ))
+$(eval $(call versioned_tarball_target , python-xmlsec   , $(PYTHON_XMLSEC_GITREF)   , $(PYTHON_XMLSEC_URI)   ))
 
 .PHONY: tarballs
 tarballs: $(addprefix tarball-,$(strip $(TARBALLS)))
