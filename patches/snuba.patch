@@ -1,28 +1,46 @@
---- a/snuba/admin/views.py
-+++ b/snuba/admin/views.py
-@@ -79,6 +79,9 @@ def clickhouse_queries() -> Response:
- def clickhouse_system_query() -> Response:
-     req = request.get_json()
-     try:
-+        if req is None:
-+            req = {}
+--- a/snuba/cli/admin.py
++++ b/snuba/cli/admin.py
+@@ -35,9 +35,11 @@ def admin(
+         WSGIRequestHandler.protocol_version = "HTTP/1.1"
+         application.run(host=host, port=port, threaded=True, debug=debug)
+     else:
++        import mywsgi
 +
-         host = req["host"]
-         port = req["port"]
-         storage = req["storage"]
---- a/snuba/schemas.py
-+++ b/snuba/schemas.py
-@@ -51,7 +51,6 @@ def validate_jsonschema(
+         if log_level:
+             os.environ["LOG_LEVEL"] = log_level
+-        uwsgi.run(
++        mywsgi.run(
+             "snuba.admin.wsgi:application",
+             f"{host}:{port}",
+             processes=processes,
+--- a/snuba/cli/api.py
++++ b/snuba/cli/api.py
+@@ -5,7 +5,6 @@ import click
  
-     validator_cls(
-         schema,
--        types={"array": (list, tuple)},
-         format_checker=jsonschema.FormatChecker(),
-     ).validate(value, schema)
+ from snuba.attribution.log import flush_attribution_producer
+ from snuba.environment import setup_logging
+-from snuba.utils import uwsgi
  
+ 
+ @click.command()
+@@ -47,11 +46,13 @@ def api(
+         WSGIRequestHandler.protocol_version = "HTTP/1.1"
+         application.run(host=host, port=port, threaded=True, debug=debug)
+     else:
++        import mywsgi
++
+         if log_level:
+             os.environ["LOG_LEVEL"] = log_level
+ 
+         with flush_attribution_producer():
+-            uwsgi.run(
++            mywsgi.run(
+                 "snuba.web.wsgi:application",
+                 f"{host}:{port}",
+                 processes=processes,
 --- a/snuba/settings/__init__.py
 +++ b/snuba/settings/__init__.py
-@@ -223,6 +223,7 @@ def _load_settings(obj: MutableMapping[str, Any] = locals()) -> None:
+@@ -349,6 +349,7 @@ def _load_settings(obj: MutableMapping[str, Any] = locals()) -> None:
      provide a full absolute path such as `/foo/bar/my_settings.py`."""
  
      import importlib
@@ -30,65 +48,3 @@
      import importlib.util
      import os
  
---- a/snuba/utils/metrics/timer.py
-+++ b/snuba/utils/metrics/timer.py
-@@ -1,23 +1,15 @@
- from itertools import groupby
--from typing import TYPE_CHECKING, Mapping, MutableSequence, Optional, Tuple
-+from typing import Mapping, MutableSequence, Optional, Tuple, TypedDict
- 
- from snuba.utils.clock import Clock, SystemClock
- from snuba.utils.metrics.backends.abstract import MetricsBackend
- from snuba.utils.metrics.types import Tags
- 
--if TYPE_CHECKING:
--    from mypy_extensions import TypedDict
--
--    class TimerData(TypedDict):
--        timestamp: int
--        duration_ms: int
--        marks_ms: Mapping[str, int]
--        tags: Tags
--
--else:
--    from typing import Any
--
--    TimerData = Mapping[Any, Any]
-+class TimerData(TypedDict):
-+    timestamp: int
-+    duration_ms: int
-+    marks_ms: Mapping[str, int]
-+    tags: Tags
- 
- 
- class Timer:
---- a/snuba/web/__init__.py
-+++ b/snuba/web/__init__.py
-@@ -1,8 +1,6 @@
- from __future__ import annotations
- 
--from typing import Any, Mapping, NamedTuple
--
--from mypy_extensions import TypedDict
-+from typing import Any, Mapping, NamedTuple, TypedDict
- 
- from snuba.reader import Column, Result, Row, transform_rows
- from snuba.utils.serializable_exception import SerializableException
---- a/snuba/web/views.py
-+++ b/snuba/web/views.py
-@@ -405,14 +405,13 @@ def _trace_transaction(dataset: Dataset) -> None:
- 
- @application.route("/query", methods=["GET", "POST"])
- @util.time_request("query")
--def unqualified_query_view(*, timer: Timer) -> WerkzeugResponse:
-+def unqualified_query_view(*, timer: Timer) -> Union[Response, str, WerkzeugResponse]:
-     if http_request.method == "GET":
-         return redirect(f"/{settings.DEFAULT_DATASET_NAME}/query", code=302)
-     elif http_request.method == "POST":
-         body = parse_request_body(http_request)
-         dataset = get_dataset(body.pop("dataset", settings.DEFAULT_DATASET_NAME))
-         _trace_transaction(dataset)
--        # Not sure what language to pass into dataset_query here
-         return dataset_query(dataset, body, timer)
-     else:
-         assert False, "unexpected fallthrough"

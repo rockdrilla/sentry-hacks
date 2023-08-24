@@ -93,29 +93,6 @@ RUN mkdir /tmp/uwsgi ; \
 
 ## ---
 
-FROM ${IMAGE_PATH}/${HELPER_IMAGE} as sentry-arroyo-prepare
-SHELL [ "/bin/sh", "-ec" ]
-
-ARG SENTRY_ARROYO_GITREF
-
-WORKDIR /app
-
-## repack sentry-arroyo tarball
-RUN mkdir /tmp/sentry-arroyo ; \
-    cd /tmp/sentry-arroyo ; \
-    tar --strip-components=1 -xf /run/artifacts/sentry-arroyo-${SENTRY_ARROYO_GITREF}.tar.gz ; \
-    ## remove unused things
-    rm -rf docs tests ; \
-    ## monkey patch requirements.txt
-    sed -Ei 's/^(confluent-kafka)([=><].*|)$/\1==2.2.0/' requirements.txt ; \
-    ## save tarball
-    tar -cf - . | gzip -9 > /app/sentry-arroyo.tar.gz ; \
-    ls -l /run/artifacts/sentry-arroyo-${SENTRY_ARROYO_GITREF}.tar.gz /app/sentry-arroyo.tar.gz ; \
-    cd / ; \
-    cleanup
-
-## ---
-
 FROM ${IMAGE_PATH}/${HELPER_IMAGE} as xmlsec-prepare
 SHELL [ "/bin/sh", "-ec" ]
 
@@ -247,9 +224,7 @@ RUN apt-list-installed > apt.deps.0
 ## build local librdkafka (*crazy*)
 RUN mkdir /tmp/librdkafka ; \
     cd /tmp/librdkafka ; \
-    apt-wrap 'gcc dpkg-dev' \
-      sh -ec 'dpkg-buildflags --export=sh > /tmp/librdkafka.buildenv' ; \
-    . /tmp/librdkafka.buildenv ; \
+    . /opt/flags ; \
     export CPPFLAGS="${CPPFLAGS} -Wno-free-nonheap-object" ; \
     export LDFLAGS="${LDFLAGS} -Wno-free-nonheap-object" ; \
     tar --strip-components=1 -xf /run/artifacts/librdkafka-${LIBRDKAFKA_GITREF}.tar.gz ; \
@@ -267,12 +242,9 @@ RUN mkdir /tmp/librdkafka ; \
     ## remove unused things
     rm -rf /usr/local/share/doc /usr/local/lib/librdkafka*.a
 
-COPY --from=sentry-arroyo-prepare  /app/sentry-arroyo.tar.gz  /app/
-
-## install sentry-arroyo
+## install confluent-kafka
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
-      pip -v install --no-binary 'confluent-kafka' /app/sentry-arroyo.tar.gz ; \
-    rm /app/sentry-arroyo.tar.gz
+      pip -v install --no-binary ':all:' 'confluent-kafka==2.2.0'
 
 RUN apt-list-installed > apt.deps.1 ; \
     set +e ; \
@@ -291,6 +263,7 @@ RUN ufind -z /usr/local ${SITE_PACKAGES} | xvp is-elf -z - | sort -zV > /tmp/elv
 FROM ${BUILDER_INTERIM_IMAGE} as sentry-deps
 SHELL [ "/bin/sh", "-ec" ]
 
+ENV CRC32C_PURE_PYTHON=0
 ENV GRPC_PYTHON_DISABLE_LIBC_COMPATIBILITY=1
 ENV GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
 ENV GRPC_PYTHON_BUILD_WITH_CYTHON=1
@@ -298,17 +271,18 @@ ENV GRPC_PYTHON_BUILD_WITH_CYTHON=1
 ENV GRPC_PYTHON_BUILD_SYSTEM_RE2=1
 ENV PYXMLSEC_OPTIMIZE_SIZE=0
 ENV BUILD_DEPS='libbrotli-dev libcurl4-openssl-dev libffi-dev libkrb5-dev liblz4-dev libmaxminddb-dev libpq-dev libre2-dev libsasl2-dev libssl-dev libxmlsec1-dev libxslt1-dev libyaml-dev libzstd-dev rapidjson-dev zlib1g-dev'
-ENV BUILD_FROM_SRC='cffi,charset-normalizer,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,psycopg2,python-rapidjson,pyyaml,regex,simplejson,zstandard'
+ENV BUILD_FROM_SRC='cffi,charset-normalizer,brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,protobuf,psycopg2,python-rapidjson,pyyaml,regex,simplejson,zstandard'
 
 ARG UWSGI_INTERIM_IMAGE
 ARG LIBRDKAFKA_INTERIM_IMAGE
+ARG GOOGLE_CRC32C_GITREF
 
 ## copy uwsgi and dependencies
 COPY --from=${UWSGI_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${UWSGI_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${UWSGI_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-## copy sentry-arroyo and librdkafka
+## copy librdkafka and confluent-kafka
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
@@ -321,6 +295,27 @@ RUN cat apt.deps.uwsgi apt.deps.librdkafka \
     | sort -uV | xargs -r apt-install ; \
     ldconfig ; \
     apt-list-installed > apt.deps.0
+
+## build local google-crc32c
+RUN mkdir /tmp/google-crc32c ; \
+    cd /tmp/google-crc32c ; \
+    . /opt/flags ; \
+    tar --strip-components=1 -xf /run/artifacts/google-crc32c-${GOOGLE_CRC32C_GITREF}.tar.gz ; \
+    apt-wrap-sodeps -p /usr/local "build-essential cmake" \
+      sh -ec '\
+        pfx=/usr/local ; \
+        cmake \
+          -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON \
+          -DCMAKE_INSTALL_PREFIX=${pfx} \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_SHARED_LIBS=yes \
+          -DCRC32C_BUILD_TESTS=0 \
+          -DCRC32C_BUILD_BENCHMARKS=0 \
+          -DCRC32C_USE_GLOG=0 \
+        ; \
+        cmake --build . -j $(nproc) ; \
+        cmake --install . --prefix ${pfx} ; \
+        ldconfig'
 
 ## install python-xmlsec
 RUN apt-wrap-python -d "${BUILD_DEPS}" \
@@ -359,6 +354,7 @@ ARG SENTRY_RELEASE
 
 ENV SENTRY_BUILD=krd.1
 ENV SENTRY_WHEEL="sentry-${SENTRY_RELEASE}-py311-none-any.whl"
+ENV SENTRY_LIGHT_WHEEL="sentry-light-${SENTRY_RELEASE}-py311-none-any.whl"
 
 ## copy binary dependencies
 COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /app/              /app/
@@ -377,7 +373,7 @@ RUN xargs -r -a apt.deps apt-install ; \
     quiet apt-install patch ; \
     ldconfig ; \
     tar -xf sentry.tar.gz ; \
-    pip -v install -r requirements-base.txt ; \
+    pip -v install -r requirements-frozen.txt ; \
     cleanup ; \
     ## hack packages!
     cd ${SITE_PACKAGES} ; \
@@ -389,14 +385,23 @@ RUN xargs -r -a apt.deps apt-install ; \
     ## hack django
     patch -p1 < /app/django.patch ; \
     rm /app/django.patch ; \
-    ## hack parsimonious
-    rm -rf parsimonious/tests/ ; \
     # recompile python cache
     cd /app ; \
     python -m compileall -q ${SITE_PACKAGES}
 
 ## install sentry as wheel
-RUN if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
+RUN if ! [ -s "/run/artifacts/${SENTRY_LIGHT_WHEEL}" ] ; then \
+        mkdir -p /tmp/sentry-build ; \
+        cd /tmp/sentry-build ; \
+        tar -xf /app/sentry.tar.gz ; \
+        SENTRY_LIGHT_BUILD=1 \
+        python setup.py bdist_wheel ; \
+        cd dist ; \
+        mv "${SENTRY_WHEEL}" "/run/artifacts/${SENTRY_LIGHT_WHEEL}" ; \
+        cd /app ; \
+        cleanup ; \
+    fi ; \
+    if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
         mkdir -p /tmp/sentry-build ; \
         cd /tmp/sentry-build ; \
         tar -xf /app/sentry.tar.gz ; \
@@ -404,7 +409,8 @@ RUN if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
           sh -ec '\
             command -V yarn >/dev/null || which yarnpkg | while read -r n ; do ln -sv $n ${n%/*}/yarn ; done ; \
             python setup.py bdist_wheel' ; \
-        find dist/ -name '*.whl' -type f -exec cp -nvt /run/artifacts {} + ; \
+        cd dist ; \
+        mv "${SENTRY_WHEEL}" /run/artifacts/ ; \
         cd /app ; \
         ## cleanup after yarn
         rm -rf /usr/local/share/.cache ; \
@@ -452,7 +458,7 @@ COPY --from=${UWSGI_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${UWSGI_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${UWSGI_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-## copy sentry-arroyo and librdkafka
+## copy librdkafka and confluent-kafka
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/

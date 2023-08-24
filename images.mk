@@ -21,10 +21,10 @@ image-interim-uwsgi: \
   $(addprefix tarball-,uwsgi uwsgi-dogstatsd) \
   image-interim-builder
 image-interim-librdkafka: \
-  $(addprefix tarball-,librdkafka sentry-arroyo) \
+  $(addprefix tarball-,librdkafka) \
   image-interim-builder
 image-interim-sentry-deps: \
-  $(addprefix tarball-,sentry python-xmlsec) \
+  $(addprefix tarball-,sentry python-xmlsec google-crc32c) \
   $(addprefix image-interim-,builder uwsgi librdkafka)
 image-interim-snuba-deps: \
   $(addprefix tarball-,snuba) \

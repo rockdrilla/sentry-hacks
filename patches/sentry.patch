@@ -9,7 +9,7 @@
  from parsimonious.grammar import Grammar, NodeVisitor
  from parsimonious.nodes import Node
  
-@@ -247,9 +247,23 @@ def flatten(children):
+@@ -258,9 +258,23 @@ def flatten(children):
      return children
  
  
@@ -32,9 +32,9 @@
 -        return not (isinstance(child, Node) and isinstance(child.expr, Optional))
 +        return not is_optional(child)
  
-     return filter(is_not_optional, children)
+     return list(filter(is_not_optional, children))
  
-@@ -290,7 +304,7 @@ def handle_negation(negation, operator):
+@@ -301,7 +315,7 @@ def handle_negation(negation, operator):
  
  def get_operator_value(operator):
      if isinstance(operator, Node):
@@ -43,6 +43,37 @@
      elif isinstance(operator, list):
          operator = operator[0]
      return operator
+--- a/src/sentry/services/http.py
++++ b/src/sentry/services/http.py
+@@ -6,20 +6,6 @@ from typing import Any, Generator, MutableMapping, NoReturn
+ 
+ from sentry.services.base import Service
+ 
+-PYUWSGI_PROG = """\
+-import os
+-import sys
+-
+-orig = sys.getdlopenflags()
+-sys.setdlopenflags(orig | os.RTLD_GLOBAL)
+-try:
+-    import pyuwsgi
+-finally:
+-    sys.setdlopenflags(orig)
+-
+-pyuwsgi.run()
+-"""
+-
+ 
+ def convert_options_to_env(options: dict[str, Any]) -> Generator[tuple[str, str], None, None]:
+     for k, v in options.items():
+@@ -193,6 +179,4 @@ class SentryHTTPServer(Service):
+             httpd.serve_forever()
+             raise AssertionError("unreachable")
+         else:
+-            # TODO: https://github.com/lincolnloop/pyuwsgi-wheels/pull/17
+-            cmd = (sys.executable, "-c", PYUWSGI_PROG)
+-            os.execvp(cmd[0], cmd)
++            os.execvp("uwsgi", ("uwsgi",))
 --- a/src/sentry/testutils/helpers/query.py
 +++ b/src/sentry/testutils/helpers/query.py
 @@ -12,14 +12,15 @@ def parse_queries(captured_queries):
@@ -68,26 +99,6 @@
 +                            break
  
      return real_queries
---- a/src/sentry/utils/codecs.py
-+++ b/src/sentry/utils/codecs.py
-@@ -1,6 +1,6 @@
- import zlib
- from abc import ABC, abstractmethod
--from typing import Generic, TypeVar, cast
-+from typing import Generic, TypeVar
- 
- import zstandard
- 
-@@ -88,7 +88,7 @@ class ZlibCodec(Codec[bytes, bytes]):
- 
- class ZstdCodec(Codec[bytes, bytes]):
-     def encode(self, value: bytes) -> bytes:
--        return cast(bytes, zstandard.ZstdCompressor().compress(value))
-+        return zstandard.ZstdCompressor().compress(value)
- 
-     def decode(self, value: bytes) -> bytes:
--        return cast(bytes, zstandard.ZstdDecompressor().decompress(value))
-+        return zstandard.ZstdDecompressor().decompress(value)
 --- a/src/sentry/utils/json.py
 +++ b/src/sentry/utils/json.py
 @@ -57,11 +57,11 @@ class JSONEncoderForHTML(JSONEncoder):

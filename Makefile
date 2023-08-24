@@ -10,7 +10,7 @@ HERE_PATH:=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 include $(HERE_PATH)common.mk
 
-SENTRY_RELEASE ?= 22.6.0
+SENTRY_RELEASE ?= 22.10.0
 PYTHON_VERSION ?= 3.11
 DISTRO         ?= debian
 SUITE          ?= bookworm

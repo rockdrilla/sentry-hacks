@@ -1,23 +1,15 @@
---- a/scripts/lib.sh
-+++ b/scripts/lib.sh
-@@ -124,13 +124,11 @@ install-py-dev() {
-     # Webpacked assets are only necessary for devserver (which does it lazily anyways)
-     # and acceptance tests, which webpack automatically if run.
-     SENTRY_LIGHT_BUILD=1 pip install -e '.[dev]'
--    patch-selenium
- }
- 
- patch-selenium() {
-     # XXX: getsentry repo calls this!
--    # This hack is until we can upgrade to a newer version of Selenium
--    python -S -m tools.patch_selenium
-+    :
- }
- 
- setup-git-config() {
 --- a/setup.cfg
 +++ b/setup.cfg
-@@ -21,7 +21,7 @@ extension =
+@@ -16,7 +16,7 @@ classifiers =
+     License :: Other/Proprietary License
+     Operating System :: POSIX :: Linux
+     Programming Language :: Python :: 3
+-    Programming Language :: Python :: 3.8
++    Programming Language :: Python :: 3.11
+     Programming Language :: Python :: 3 :: Only
+     Topic :: Software Development
+ 
+@@ -109,7 +109,7 @@ extension =
      S=tools.flake8_plugin:SentryCheck
  
  [bdist_wheel]
@@ -28,24 +20,15 @@
  omit =
 --- a/setup.py
 +++ b/setup.py
-@@ -87,7 +87,7 @@ def get_requirements(env):
+@@ -86,7 +86,7 @@ def get_requirements(env):
  # Only include dev requirements in non-binary distributions as we don't want these
  # to be listed in the wheels. Main reason for this is being able to use git/URL dependencies
  # for development, which will be rejected by PyPI when trying to upload the wheel.
 -extras_require = {"rabbitmq": ["amqp==2.6.1"]}
 +extras_require = {"rabbitmq": ["amqp==5.0.9"]}
  if not sys.argv[1:][0].startswith("bdist"):
-     extras_require["dev"] = get_requirements("dev")
+     extras_require["dev"] = get_requirements("dev-frozen")
  
-@@ -161,7 +161,7 @@ setup(
-         "Intended Audience :: System Administrators",
-         "Operating System :: POSIX :: Linux",
-         "Programming Language :: Python :: 3",
--        "Programming Language :: Python :: 3.8",
-+        "Programming Language :: Python :: 3.11",
-         "Topic :: Software Development",
-         "License :: Other/Proprietary License",
-     ],
 --- a/src/sentry/utils/distutils/commands/base.py
 +++ b/src/sentry/utils/distutils/commands/base.py
 @@ -122,7 +122,7 @@ class BaseBuildCommand(Command):
