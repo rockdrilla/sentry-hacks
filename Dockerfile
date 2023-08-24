@@ -364,6 +364,7 @@ COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
 COPY --from=sentry-prepare  /app/sentry.tar.gz  /app/
 
 COPY /patches/sentry.patch  /app/
+COPY /patches/celery.patch  /app/
 COPY /patches/django.patch  /app/
 
 WORKDIR /app
@@ -389,6 +390,9 @@ RUN xargs -r -a apt.deps apt-install ; \
       -e "s/if key is ''/if key == ''/" \
       -e "s/if key_extra_len is 0/if key_extra_len == 0/" \
     memcache.py ; \
+    ## hack celery
+    patch -p1 < /app/celery.patch ; \
+    rm /app/celery.patch ; \
     ## hack django
     patch -p1 < /app/django.patch ; \
     rm /app/django.patch ; \
