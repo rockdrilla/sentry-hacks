@@ -375,6 +375,13 @@ RUN xargs -r -a apt.deps apt-install ; \
     tar -xf sentry.tar.gz ; \
     pip -v install -r requirements-frozen.txt ; \
     cleanup ; \
+    ## adjust cacert.pem (damnit)
+    find ${SITE_PACKAGES} -name cacert.pem -type f \
+    | while read -r n ; do \
+        [ -n "$n" ] || continue ; \
+        rm -fv "$n" ; \
+        ln -s /etc/ssl/certs/ca-certificates.crt "$n" ; \
+    done ; \
     ## hack packages!
     cd ${SITE_PACKAGES} ; \
     # monkey patch python-memcached
@@ -512,7 +519,14 @@ RUN xargs -r -a apt.deps apt-install ; \
     tar -xf snuba.tar.gz ; \
     rm snuba.tar.gz ; \
     pip -v install -r requirements.txt ; \
-    cleanup
+    cleanup ; \
+    ## adjust cacert.pem (damnit)
+    find ${SITE_PACKAGES} -name cacert.pem -type f \
+    | while read -r n ; do \
+        [ -n "$n" ] || continue ; \
+        rm -fv "$n" ; \
+        ln -s /etc/ssl/certs/ca-certificates.crt "$n" ; \
+    done
 
 ## install snuba "in-place"
 RUN pip -v install --no-deps -e . ; \
