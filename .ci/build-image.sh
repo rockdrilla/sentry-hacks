@@ -142,6 +142,16 @@ build_image_cleanup() {
 	fi
 }
 build_image() {
+
+	case "${BUILD_IMAGE_PULL}" in
+	0 )
+		append --pull=false
+	;;
+	always | missing | never | true | false )
+		append "--pull=${BUILD_IMAGE_PULL}"
+	;;
+	esac
+
 	if [ -n "${BUILD_IMAGE_PLATFORM}" ] ; then
 		append --platform "${BUILD_IMAGE_PLATFORM}"
 	else
@@ -150,11 +160,12 @@ build_image() {
 		[ -z "${BUILD_IMAGE_VARIANT}" ] || append --variant "${BUILD_IMAGE_VARIANT}"
 	fi
 
-	: "${BUILD_IMAGE_NETWORK:=host}"
-	case "${BUILD_IMAGE_NETWORK}" in
-	none) append --http-proxy=false ;;
-	esac
-	append "--net=${BUILD_IMAGE_NETWORK}"
+	if [ -n "${BUILD_IMAGE_NETWORK}" ] ; then
+		case "${BUILD_IMAGE_NETWORK}" in
+		none) append --http-proxy=false ;;
+		esac
+		append "--net=${BUILD_IMAGE_NETWORK}"
+	fi
 
 	# (always) passthrough GitLab CI/CD env
 	if [ -n "${CI:+1}" ] ; then
