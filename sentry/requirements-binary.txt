@@ -1,5 +1,5 @@
-brotli==1.0.9
-cffi==1.15.1
+brotli==1.1.0
+cffi==1.16.0
 charset-normalizer==3.2.0
 google-crc32c==1.5.0
 grpcio==1.57.0
@@ -7,10 +7,10 @@ hiredis==2.2.3
 lxml==4.9.3
 maxminddb==2.4.0
 mmh3==4.0.1
-msgpack==1.0.5
-protobuf==4.24.1
-psycopg2==2.9.7
-python-rapidjson==1.10
+msgpack==1.0.7
+protobuf==4.24.3
+psycopg2==2.9.8
+python-rapidjson==1.11
 pyyaml==6.0.1
 regex==2023.8.8
 simplejson==3.19.1
