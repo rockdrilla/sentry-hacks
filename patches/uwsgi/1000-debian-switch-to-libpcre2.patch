@@ -2,21 +2,48 @@ Description: switch to pcre2
 Origin: upstream, https://github.com/unbit/uwsgi/pull/2543
 Author: Alexandre Rossi <alexandre.rossi@gmail.com>
 Bug: https://github.com/unbit/uwsgi/pull/2543
-Last-Update: 2023-07-25
+Last-Update: 2023-08-24
 ---
 This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
 --- a/core/alarm.c
 +++ b/core/alarm.c
-@@ -170,7 +170,7 @@
+@@ -160,7 +160,7 @@
+ }
+ 
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ static int uwsgi_alarm_log_add(char *alarms, char *regexp, int negate) {
+ 
+ 	struct uwsgi_alarm_log *old_ual = NULL, *ual = uwsgi.alarm_logs;
+@@ -170,7 +170,8 @@
  	}
  
  	ual = uwsgi_calloc(sizeof(struct uwsgi_alarm_log));
 -	if (uwsgi_regexp_build(regexp, &ual->pattern, &ual->pattern_extra)) {
 +	if (uwsgi_regexp_build(regexp, &ual->pattern)) {
++		free(ual);
  		return -1;
  	}
  	ual->negate = negate;
-@@ -383,7 +383,7 @@
+@@ -330,7 +331,7 @@
+ 		usl = usl->next;
+ 	}
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	// then map log-alarm
+ 	usl = uwsgi.alarm_logs_list;
+ 	while (usl) {
+@@ -376,14 +377,14 @@
+ 	}
+ }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ // check if a log should raise an alarm
+ void uwsgi_alarm_log_check(char *msg, size_t len) {
+ 	if (!uwsgi_strncmp(msg, len, "[uwsgi-alarm", 12))
  		return;
  	struct uwsgi_alarm_log *ual = uwsgi.alarm_logs;
  	while (ual) {
@@ -25,9 +52,34 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  			if (!ual->negate) {
  				struct uwsgi_alarm_ll *uall = ual->alarms;
  				while (uall) {
+--- a/core/config.c
++++ b/core/config.c
+@@ -314,7 +314,7 @@
+         return 0;
+ }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ int uwsgi_logic_opt_if_hostname_match(char *key, char *value) {
+ 	if (uwsgi_regexp_match_pattern(uwsgi.logic_opt_data, uwsgi.hostname)) {
+ 		add_exported_option(key, uwsgi_substitute(value, "%(_)", uwsgi.logic_opt_data), 0);
 --- a/core/logging.c
 +++ b/core/logging.c
-@@ -1402,7 +1402,7 @@
+@@ -414,7 +414,7 @@
+                 usl = usl->next;
+         }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	// set logger by its id
+ 	struct uwsgi_regexp_list *url = uwsgi.log_route;
+ 	while (url) {
+@@ -1398,11 +1398,11 @@
+ 
+         ssize_t rlen = read(uwsgi.shared->worker_log_pipe[0], uwsgi.log_master_buf, uwsgi.log_master_bufsize);
+         if (rlen > 0) {
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
                  uwsgi_alarm_log_check(uwsgi.log_master_buf, rlen);
                  struct uwsgi_regexp_list *url = uwsgi.log_drain_rules;
                  while (url) {
@@ -54,7 +106,12 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
                                  struct uwsgi_logger *ul_route = (struct uwsgi_logger *) url->custom_ptr;
                                  if (ul_route) {
  					uwsgi_log_func_do(uwsgi.requested_log_encoders, ul_route, uwsgi.log_master_buf, rlen);
-@@ -1468,7 +1468,7 @@
+@@ -1464,11 +1464,11 @@
+ 
+         ssize_t rlen = read(uwsgi.shared->worker_req_log_pipe[0], uwsgi.log_master_buf, uwsgi.log_master_bufsize);
+         if (rlen > 0) {
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
                  struct uwsgi_regexp_list *url = uwsgi.log_req_route;
                  int finish = 0;
                  while (url) {
@@ -65,39 +122,64 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
                                          uwsgi_log_func_do(uwsgi.requested_log_req_encoders, ul_route, uwsgi.log_master_buf, rlen);
 --- a/core/regexp.c
 +++ b/core/regexp.c
-@@ -13,49 +13,65 @@
+@@ -1,4 +1,4 @@
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ #include "uwsgi.h"
+ 
+ extern struct uwsgi_server uwsgi;
+@@ -13,48 +13,111 @@
  #endif
  }
  
 -int uwsgi_regexp_build(char *re, pcre ** pattern, pcre_extra ** pattern_extra) {
-+int uwsgi_regexp_build(char *re, pcre2_code ** pattern) {
++int uwsgi_regexp_build(char *re, uwsgi_pcre ** pattern) {
  
--	const char *errstr;
--	int erroff;
++#ifdef UWSGI_PCRE2
 +	int errnbr;
 +	long unsigned int erroff;
++
++	*pattern = pcre2_compile((const unsigned char *) re, PCRE2_ZERO_TERMINATED, 0, &errnbr, &erroff, NULL);
++#else
+ 	const char *errstr;
+ 	int erroff;
  
 -	*pattern = pcre_compile((const char *) re, 0, &errstr, &erroff, NULL);
-+	*pattern = pcre2_compile((const unsigned char *) re, PCRE2_ZERO_TERMINATED, 0, &errnbr, &erroff, NULL);
- 	if (!*pattern) {
--		uwsgi_log("pcre error: %s at offset %d\n", errstr, erroff);
+-	if (!*pattern) {
++	*pattern = uwsgi_malloc(sizeof(uwsgi_pcre));
++	(*pattern)->p = pcre_compile((const char *) re, 0, &errstr, &erroff, NULL);
++#endif
++#ifdef UWSGI_PCRE2
++	if (!(*pattern)) {
 +		uwsgi_log("pcre error: code %d at offset %d\n", errnbr, erroff);
++#else
++	if (!((*pattern)->p)) {
+ 		uwsgi_log("pcre error: %s at offset %d\n", errstr, erroff);
++#endif
  		return -1;
  	}
  
--	int opt = uwsgi.pcre_jit;
--
--	*pattern_extra = (pcre_extra *) pcre_study((const pcre *) *pattern, opt, &errstr);
--	if (*pattern_extra == NULL && errstr != NULL) {
--		pcre_free(*pattern);
--		uwsgi_log("pcre (study) error: %s\n", errstr);
--		return -1;
++#ifdef UWSGI_PCRE2
 +	if (uwsgi.pcre_jit) {
 +		errnbr = pcre2_jit_compile(*pattern, PCRE2_JIT_COMPLETE);
 +		if (errnbr) {
++			pcre2_code_free(*pattern);
 +			uwsgi_log("pcre JIT compile error code %d\n", errnbr);
 +			return -1;
 +		}
++#else
+ 	int opt = uwsgi.pcre_jit;
+ 
+-	*pattern_extra = (pcre_extra *) pcre_study((const pcre *) *pattern, opt, &errstr);
+-	if (*pattern_extra == NULL && errstr != NULL) {
+-		pcre_free(*pattern);
++	(*pattern)->extra = (pcre_extra *) pcre_study((const pcre *) (*pattern)->p, opt, &errstr);
++	if ((*pattern)->extra == NULL && errstr != NULL) {
++		pcre_free((*pattern)->p);
++		free(*pattern);
+ 		uwsgi_log("pcre (study) error: %s\n", errstr);
+ 		return -1;
++#endif
  	}
  
  	return 0;
@@ -105,53 +187,75 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  }
  
 -int uwsgi_regexp_match(pcre * pattern, pcre_extra * pattern_extra, char *subject, int length) {
-+int uwsgi_regexp_match(pcre2_code *pattern, const char *subject, int length) {
- 
+-
 -	return pcre_exec((const pcre *) pattern, (const pcre_extra *) pattern_extra, subject, length, 0, 0, NULL, 0);
++int uwsgi_regexp_match(uwsgi_pcre *pattern, const char *subject, int length) {
++#ifdef UWSGI_PCRE2
 +	return pcre2_match(pattern, (const unsigned char *)subject, length, 0, 0, NULL, NULL);
++#else
++	return pcre_exec((const pcre *) pattern->p, (const pcre_extra *) pattern->extra, subject, length, 0, 0, NULL, 0);
++#endif
  }
  
 -int uwsgi_regexp_match_ovec(pcre * pattern, pcre_extra * pattern_extra, char *subject, int length, int *ovec, int n) {
-+int uwsgi_regexp_match_ovec(pcre2_code *pattern, const char *subject, int length, int *ovec, int n) {
++int uwsgi_regexp_match_ovec(uwsgi_pcre *pattern, const char *subject, int length, int *ovec, int n) {
 +
++#ifdef UWSGI_PCRE2
 +	int rc;
 +	int i;
 +	pcre2_match_data *match_data;
 +	size_t *pcre2_ovec;
-+
+ 
 +	match_data = pcre2_match_data_create_from_pattern(pattern, NULL);
 +	rc = pcre2_match(pattern, (const unsigned char *)subject, length, 0, 0, match_data, NULL);
- 
++#endif
++
++		/*
++		 * Quoting PCRE{,2} spec, "The first pair of integers, ovector[0]
++		 * and ovector[1], identify the portion of the subject string matched
++		 * by the entire pattern. The next pair is used for the first capturing
++		 * subpattern, and so on." Therefore, the ovector size is the number of
++		 * capturing subpatterns (INFO_CAPTURECOUNT), from uwsgi_regexp_ovector(),
++		 * as matching pairs, plus room for the first pair.
++		 */
  	if (n > 0) {
 -		return pcre_exec((const pcre *) pattern, (const pcre_extra *) pattern_extra, subject, length, 0, 0, ovec, (n + 1) * 3);
++#ifdef UWSGI_PCRE2
 +		// copy pcre2 output vector to uwsgi output vector
 +		pcre2_ovec = pcre2_get_ovector_pointer(match_data);
-+		for (i=0;i<2*n+1;i++) {
++		for (i=0;i<(n+1)*2;i++) {
 +			ovec[i] = pcre2_ovec[i];
 +		}
++#else
++		return pcre_exec((const pcre *) pattern->p, (const pcre_extra *) pattern->extra, subject, length, 0, 0, ovec, PCRE_OVECTOR_BYTESIZE(n));
++#endif
  	}
 -	return pcre_exec((const pcre *) pattern, (const pcre_extra *) pattern_extra, subject, length, 0, 0, NULL, 0);
 +
++#ifdef UWSGI_PCRE2
 +	pcre2_match_data_free(match_data);
 +
 +	return rc;
++#else
++	return pcre_exec((const pcre *) pattern->p, (const pcre_extra *) pattern->extra, subject, length, 0, 0, NULL, 0);
++#endif
  }
  
 -int uwsgi_regexp_ovector(pcre * pattern, pcre_extra * pattern_extra) {
-+int uwsgi_regexp_ovector(pcre2_code *pattern) {
++int uwsgi_regexp_ovector(const uwsgi_pcre *pattern) {
  
  	int n;
-+	pcre2_match_data *match_data;
- 
+-
 -	if (pcre_fullinfo((const pcre *) pattern, (const pcre_extra *) pattern_extra, PCRE_INFO_CAPTURECOUNT, &n))
--		return 0;
-+	match_data = pcre2_match_data_create_from_pattern(pattern, NULL);
-+	n = pcre2_get_ovector_count(match_data);
-+	pcre2_match_data_free(match_data);
++#ifdef UWSGI_PCRE2
++	if (pcre2_pattern_info(pattern, PCRE2_INFO_CAPTURECOUNT, &n))
++#else
++	if (pcre_fullinfo((const pcre *) pattern->p, (const pcre_extra *) pattern->extra, PCRE_INFO_CAPTURECOUNT, &n))
++#endif
+ 		return 0;
  
  	return n;
- }
-@@ -66,7 +82,7 @@
+@@ -66,7 +129,7 @@
  	int dollar = 0;
  
  	size_t dollars = n;
@@ -186,17 +290,17 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
 +				ur->ovn[i] = uwsgi_regexp_ovector(ur->pattern);
                  		if (ur->ovn[i] > 0) {
 -                        		ur->ovector[i] = uwsgi_calloc(sizeof(int) * (3 * (ur->ovn[i] + 1)));
-+                        		ur->ovector[i] = uwsgi_calloc(sizeof(int) * (2 * (ur->ovn[i] + 1)));
++                        		ur->ovector[i] = uwsgi_calloc(sizeof(int) * PCRE_OVECTOR_BYTESIZE(ur->ovn[i]));
                  		}
  			}
  		}
-@@ -1484,38 +1484,27 @@
+@@ -1484,38 +1484,47 @@
          ur->condition_ub[wsgi_req->async_id] = uwsgi_routing_translate(wsgi_req, ur, NULL, 0, ur->subject_str, semicolon - ur->subject_str);
          if (!ur->condition_ub[wsgi_req->async_id]) return -1;
  
 -	pcre *pattern;
 -	pcre_extra *pattern_extra;
-+	pcre2_code *pattern;
++	uwsgi_pcre *pattern;
  	char *re = uwsgi_concat2n(semicolon+1, ur->subject_str_len - ((semicolon+1) - ur->subject_str), "", 0);
 -	if (uwsgi_regexp_build(re, &pattern, &pattern_extra)) {
 +	if (uwsgi_regexp_build(re, &pattern)) {
@@ -214,32 +318,50 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  
 -	if (uwsgi_regexp_match_ovec(pattern, pattern_extra, ur->condition_ub[wsgi_req->async_id]->buf, ur->condition_ub[wsgi_req->async_id]->pos, ur->ovector[wsgi_req->async_id], ur->ovn[wsgi_req->async_id] ) >= 0) {
 -		pcre_free(pattern);
--#ifdef PCRE_STUDY_JIT_COMPILE
--		pcre_free_study(pattern_extra);
--#else
--		pcre_free(pattern_extra);
--#endif
 +	if (uwsgi_regexp_match_ovec(pattern, ur->condition_ub[wsgi_req->async_id]->buf, ur->condition_ub[wsgi_req->async_id]->pos, ur->ovector[wsgi_req->async_id], ur->ovn[wsgi_req->async_id] ) >= 0) {
++#ifdef UWSGI_PCRE2
 +		pcre2_code_free(pattern);
++#else
++		pcre_free(pattern->p);
+ #ifdef PCRE_STUDY_JIT_COMPILE
+-		pcre_free_study(pattern_extra);
++		pcre_free_study(pattern->extra);
+ #else
+-		pcre_free(pattern_extra);
++		pcre_free(pattern->extra);
++#endif
++		free(pattern);
+ #endif
  		return 1;
  	}
  
 -	pcre_free(pattern);
--#ifdef PCRE_STUDY_JIT_COMPILE
--	pcre_free_study(pattern_extra);
--#else
--	pcre_free(pattern_extra);
--#endif
--        return 0;
++#ifdef UWSGI_PCRE2
 +	pcre2_code_free(pattern);
++#else
++	pcre_free(pattern->p);
+ #ifdef PCRE_STUDY_JIT_COMPILE
+-	pcre_free_study(pattern_extra);
++	pcre_free_study(pattern->extra);
+ #else
+-	pcre_free(pattern_extra);
++	pcre_free(pattern->extra);
+ #endif
+-        return 0;
++	free(pattern);
++#endif
 +	return 0;
  }
  
  static int uwsgi_route_condition_empty(struct wsgi_request *wsgi_req, struct uwsgi_route *ur) {
 --- a/core/ssl.c
 +++ b/core/ssl.c
-@@ -148,7 +148,7 @@
- #ifdef UWSGI_PCRE
+@@ -145,10 +145,10 @@
+ 
+ 	if (uwsgi.subscription_dotsplit) goto end;
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
          struct uwsgi_regexp_list *url = uwsgi.sni_regexp;
          while(url) {
 -                if (uwsgi_regexp_match(url->pattern, url->pattern_extra, (char *)servername, servername_len) >= 0) {
@@ -247,9 +369,32 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
                          SSL_set_SSL_CTX(ssl, url->custom_ptr);
                          return SSL_TLSEXT_ERR_OK;
                  }
+@@ -621,7 +621,7 @@
+                 return;
+         }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+         if (!strcmp(opt, "sni-regexp")) {
+                 struct uwsgi_regexp_list *url = uwsgi_regexp_new_list(&uwsgi.sni_regexp, v);
+                 url->custom_ptr = ctx;
+@@ -630,7 +630,7 @@
+ #endif
+                 struct uwsgi_string_list *usl = uwsgi_string_new_list(&uwsgi.sni, v);
+                 usl->custom_ptr = ctx;
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+         }
+ #endif
+ 
 --- a/core/static.c
 +++ b/core/static.c
-@@ -39,7 +39,7 @@
+@@ -35,11 +35,11 @@
+ 		usl = usl->next;
+ 	}
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
  	// check for regexp
  	struct uwsgi_regexp_list *url = uwsgi.static_gzip;
  	while(url) {
@@ -258,6 +403,15 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  			goto gzip;
  		}
  		url = url->next;
+@@ -216,7 +216,7 @@
+ 	return 0;
+ }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ int uwsgi_add_expires(struct wsgi_request *wsgi_req, char *filename, int filename_len, struct stat *st) {
+ 
+ 	struct uwsgi_dyn_dict *udd = uwsgi.static_expires;
 @@ -225,7 +225,7 @@
  	char expires[31];
  
@@ -312,8 +466,26 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  			int delta = uwsgi_str_num(udd->value, udd->vallen);
  			int size = uwsgi_http_date(st->st_mtime + delta, expires);
  			if (size > 0) {
+@@ -507,7 +507,7 @@
+ 		if (uwsgi_response_prepare_headers(wsgi_req, "200 OK", 6)) return -1;
+ 	}
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	uwsgi_add_expires(wsgi_req, real_filename, real_filename_len, st);
+ 	uwsgi_add_expires_path_info(wsgi_req, st);
+ 	uwsgi_add_expires_uri(wsgi_req, st);
 --- a/core/utils.c
 +++ b/core/utils.c
+@@ -2301,7 +2301,7 @@
+ 	return uwsgi_string;
+ }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ struct uwsgi_regexp_list *uwsgi_regexp_custom_new_list(struct uwsgi_regexp_list **list, char *value, char *custom) {
+ 
+ 	struct uwsgi_regexp_list *url = *list, *old_url;
 @@ -2320,7 +2320,7 @@
  		old_url->next = url;
  	}
@@ -323,24 +495,108 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  		exit(1);
  	}
  	url->next = NULL;
-@@ -2333,12 +2333,11 @@
+@@ -2333,14 +2333,13 @@
  
  int uwsgi_regexp_match_pattern(char *pattern, char *str) {
  
 -	pcre *regexp;
 -	pcre_extra *regexp_extra;
-+	pcre2_code *regexp;
++	uwsgi_pcre *regexp;
  
 -	if (uwsgi_regexp_build(pattern, &regexp, &regexp_extra))
 +	if (uwsgi_regexp_build(pattern, &regexp))
  		return 1;
 -	return !uwsgi_regexp_match(regexp, regexp_extra, str, strlen(str));
-+	return !uwsgi_regexp_match(regexp, str, strlen(str));
- }
+-}
  
++	return !uwsgi_regexp_match(regexp, str, strlen(str));
++}
+ 
+ #endif
  
 --- a/core/uwsgi.c
 +++ b/core/uwsgi.c
+@@ -130,7 +130,7 @@
+ 	{"if-hostname", required_argument, 0, "(opt logic) check for hostname", uwsgi_opt_logic, (void *) uwsgi_logic_opt_if_hostname, UWSGI_OPT_IMMEDIATE},
+ 	{"if-not-hostname", required_argument, 0, "(opt logic) check for hostname", uwsgi_opt_logic, (void *) uwsgi_logic_opt_if_not_hostname, UWSGI_OPT_IMMEDIATE},
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	{"if-hostname-match", required_argument, 0, "(opt logic) try to match hostname against a regular expression", uwsgi_opt_logic, (void *) uwsgi_logic_opt_if_hostname_match, UWSGI_OPT_IMMEDIATE},
+ 	{"if-not-hostname-match", required_argument, 0, "(opt logic) try to match hostname against a regular expression", uwsgi_opt_logic, (void *) uwsgi_logic_opt_if_not_hostname_match, UWSGI_OPT_IMMEDIATE},
+ #endif
+@@ -548,7 +548,7 @@
+ 	{"ksm", optional_argument, 0, "enable Linux KSM", uwsgi_opt_set_int, &uwsgi.linux_ksm, 0},
+ #endif
+ #endif
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	{"pcre-jit", no_argument, 0, "enable pcre jit (if available)", uwsgi_opt_pcre_jit, NULL, UWSGI_OPT_IMMEDIATE},
+ #endif
+ 	{"never-swap", no_argument, 0, "lock all memory pages avoiding swapping", uwsgi_opt_true, &uwsgi.never_swap, 0},
+@@ -679,7 +679,7 @@
+ 	{"ssl-enable-sslv3", no_argument, 0, "enable SSLv3 (insecure)", uwsgi_opt_true, &uwsgi.sslv3, 0},
+ 	{"ssl-enable-tlsv1", no_argument, 0, "enable TLSv1 (insecure)", uwsgi_opt_true, &uwsgi.tlsv1, 0},
+ 	{"ssl-option", no_argument, 0, "set a raw ssl option (numeric value)", uwsgi_opt_add_string_list, &uwsgi.ssl_options, 0},
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	{"sni-regexp", required_argument, 0, "add an SNI-governed SSL context (the key is a regexp)", uwsgi_opt_sni, NULL, 0},
+ #endif
+ 	{"ssl-tmp-dir", required_argument, 0, "store ssl-related temp files in the specified directory", uwsgi_opt_set_str, &uwsgi.ssl_tmp_dir, 0},
+@@ -715,7 +715,7 @@
+ 	{"log-req-encoder", required_argument, 0, "add an item in the log req encoder chain", uwsgi_opt_add_string_list, &uwsgi.requested_log_req_encoders, UWSGI_OPT_MASTER | UWSGI_OPT_LOG_MASTER},
+ 	
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	{"log-drain", required_argument, 0, "drain (do not show) log lines matching the specified regexp", uwsgi_opt_add_regexp_list, &uwsgi.log_drain_rules, UWSGI_OPT_MASTER | UWSGI_OPT_LOG_MASTER},
+ 	{"log-filter", required_argument, 0, "show only log lines matching the specified regexp", uwsgi_opt_add_regexp_list, &uwsgi.log_filter_rules, UWSGI_OPT_MASTER | UWSGI_OPT_LOG_MASTER},
+ 	{"log-route", required_argument, 0, "log to the specified named logger if regexp applied on logline matches", uwsgi_opt_add_regexp_custom_list, &uwsgi.log_route, UWSGI_OPT_MASTER | UWSGI_OPT_LOG_MASTER},
+@@ -736,7 +736,7 @@
+ 	{"alarm-lq", required_argument, 0, "raise the specified alarm when the socket backlog queue is full", uwsgi_opt_add_string_list, &uwsgi.alarm_backlog, UWSGI_OPT_MASTER},
+ 	{"alarm-listen-queue", required_argument, 0, "raise the specified alarm when the socket backlog queue is full", uwsgi_opt_add_string_list, &uwsgi.alarm_backlog, UWSGI_OPT_MASTER},
+ 	{"listen-queue-alarm", required_argument, 0, "raise the specified alarm when the socket backlog queue is full", uwsgi_opt_add_string_list, &uwsgi.alarm_backlog, UWSGI_OPT_MASTER},
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	{"log-alarm", required_argument, 0, "raise the specified alarm when a log line matches the specified regexp, syntax: <alarm>[,alarm...] <regexp>", uwsgi_opt_add_string_list, &uwsgi.alarm_logs_list, UWSGI_OPT_MASTER | UWSGI_OPT_LOG_MASTER},
+ 	{"alarm-log", required_argument, 0, "raise the specified alarm when a log line matches the specified regexp, syntax: <alarm>[,alarm...] <regexp>", uwsgi_opt_add_string_list, &uwsgi.alarm_logs_list, UWSGI_OPT_MASTER | UWSGI_OPT_LOG_MASTER},
+ 	{"not-log-alarm", required_argument, 0, "skip the specified alarm when a log line matches the specified regexp, syntax: <alarm>[,alarm...] <regexp>", uwsgi_opt_add_string_list_custom, &uwsgi.alarm_logs_list, UWSGI_OPT_MASTER | UWSGI_OPT_LOG_MASTER},
+@@ -915,7 +915,7 @@
+ 	{"static-expires-type", required_argument, 0, "set the Expires header based on content type", uwsgi_opt_add_dyn_dict, &uwsgi.static_expires_type, UWSGI_OPT_MIME},
+ 	{"static-expires-type-mtime", required_argument, 0, "set the Expires header based on content type and file mtime", uwsgi_opt_add_dyn_dict, &uwsgi.static_expires_type_mtime, UWSGI_OPT_MIME},
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	{"static-expires", required_argument, 0, "set the Expires header based on filename regexp", uwsgi_opt_add_regexp_dyn_dict, &uwsgi.static_expires, UWSGI_OPT_MIME},
+ 	{"static-expires-mtime", required_argument, 0, "set the Expires header based on filename regexp and file mtime", uwsgi_opt_add_regexp_dyn_dict, &uwsgi.static_expires_mtime, UWSGI_OPT_MIME},
+ 
+@@ -2424,7 +2424,7 @@
+ 	}
+ 
+ 	uwsgi_log_initial("clock source: %s\n", uwsgi.clock->name);
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	if (uwsgi.pcre_jit) {
+ 		uwsgi_log_initial("pcre jit enabled\n");
+ 	}
+@@ -4186,7 +4186,7 @@
+ 	usl->custom = 1;
+ }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ void uwsgi_opt_add_regexp_list(char *opt, char *value, void *list) {
+ 	struct uwsgi_regexp_list **ptr = (struct uwsgi_regexp_list **) list;
+ 	uwsgi_regexp_new_list(ptr, value);
+@@ -4452,7 +4452,7 @@
+ 
+ }
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ void uwsgi_opt_add_regexp_dyn_dict(char *opt, char *value, void *dict) {
+ 
+ 	char *space = strchr(value, ' ');
 @@ -4467,7 +4467,7 @@
  
  	char *regexp = uwsgi_concat2n(value, space - value, "", 0);
@@ -350,111 +606,249 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  		exit(1);
  	}
  
+--- a/plugins/php/php_plugin.c
++++ b/plugins/php/php_plugin.c
+@@ -16,7 +16,7 @@
+ 	struct uwsgi_string_list *index;
+ 	struct uwsgi_string_list *set;
+ 	struct uwsgi_string_list *append_config;
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	struct uwsgi_regexp_list *app_bypass;
+ #endif
+ 	struct uwsgi_string_list *vars;
+@@ -63,7 +63,7 @@
+         {"php-fallback", required_argument, 0, "run the specified php script when the requested one does not exist", uwsgi_opt_set_str, &uphp.fallback, 0},
+         {"php-fallback2", required_argument, 0, "run the specified php script relative to the document root when the requested one does not exist", uwsgi_opt_set_str, &uphp.fallback2, 0},
+         {"php-fallback-qs", required_argument, 0, "php-fallback with QUERY_STRING set", uwsgi_opt_set_str, &uphp.fallback_qs, 0},
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+         {"php-app-bypass", required_argument, 0, "if the regexp matches the uri the --php-app is bypassed", uwsgi_opt_add_regexp_list, &uphp.app_bypass, 0},
+ #endif
+         {"php-var", required_argument, 0, "add/overwrite a CGI variable at each request", uwsgi_opt_add_string_list, &uphp.vars, 0},
+@@ -810,10 +810,14 @@
+ 	wsgi_req->document_root_len = strlen(wsgi_req->document_root);
+ 
+ 	if (uphp.app) {
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 		struct uwsgi_regexp_list *bypass = uphp.app_bypass;
+ 		while (bypass) {
++#ifdef UWSGI_PCRE2
++                        if (uwsgi_regexp_match(bypass->pattern, wsgi_req->uri, wsgi_req->uri_len) >= 0) {
++#else
+                         if (uwsgi_regexp_match(bypass->pattern, bypass->pattern_extra, wsgi_req->uri, wsgi_req->uri_len) >= 0) {
++#endif
+ 				goto oldstyle;
+                         }
+                         bypass = bypass->next;
+@@ -849,7 +853,7 @@
+ 		goto secure2;
+ 	}
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ oldstyle:
+ #endif
+ 
 --- a/uwsgi.h
 +++ b/uwsgi.h
-@@ -439,7 +439,8 @@
+@@ -438,8 +438,26 @@
+ #define uwsgi_wait_read_req(x) uwsgi.wait_read_hook(x->fd, uwsgi.socket_timeout) ; x->switches++
  #define uwsgi_wait_write_req(x) uwsgi.wait_write_hook(x->fd, uwsgi.socket_timeout) ; x->switches++
  
- #ifdef UWSGI_PCRE
--#include <pcre.h>
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
++#ifdef UWSGI_PCRE2
++
 +#define PCRE2_CODE_UNIT_WIDTH 8
 +#include <pcre2.h>
++#define PCRE_OVECTOR_BYTESIZE(n) (n+1)*2
++
++typedef pcre2_code uwsgi_pcre;
++
++#else
++
+ #include <pcre.h>
++#define PCRE_OVECTOR_BYTESIZE(n) (n+1)*3
++
++typedef struct {
++	pcre *p;
++	pcre_extra *extra;
++} uwsgi_pcre;
++
++#endif
  #endif
  
  struct uwsgi_dyn_dict {
-@@ -456,8 +457,7 @@
+@@ -455,9 +473,8 @@
+ 	struct uwsgi_dyn_dict *prev;
  	struct uwsgi_dyn_dict *next;
  
- #ifdef UWSGI_PCRE
+-#ifdef UWSGI_PCRE
 -	pcre *pattern;
 -	pcre_extra *pattern_extra;
-+	pcre2_code *pattern;
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
++	uwsgi_pcre *pattern;
  #endif
  
  };
-@@ -471,8 +471,7 @@
- #ifdef UWSGI_PCRE
+@@ -468,11 +485,10 @@
+ 	struct uwsgi_hook *next;
+ };
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
  struct uwsgi_regexp_list {
  
 -	pcre *pattern;
 -	pcre_extra *pattern_extra;
-+	pcre2_code *pattern;
++    uwsgi_pcre *pattern;
  
  	uint64_t custom;
  	char *custom_str;
-@@ -1090,10 +1089,10 @@
+@@ -1089,11 +1105,11 @@
+ 	void (*post_uwsgi_fork) (int);
  };
  
- #ifdef UWSGI_PCRE
+-#ifdef UWSGI_PCRE
 -int uwsgi_regexp_build(char *, pcre **, pcre_extra **);
 -int uwsgi_regexp_match(pcre *, pcre_extra *, char *, int);
 -int uwsgi_regexp_match_ovec(pcre *, pcre_extra *, char *, int, int *, int);
 -int uwsgi_regexp_ovector(pcre *, pcre_extra *);
-+int uwsgi_regexp_build(char *, pcre2_code **);
-+int uwsgi_regexp_match(pcre2_code *, const char *, int);
-+int uwsgi_regexp_match_ovec(pcre2_code *, const char *, int, int *, int);
-+int uwsgi_regexp_ovector(pcre2_code *);
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
++int uwsgi_regexp_build(char *, uwsgi_pcre **);
++int uwsgi_regexp_match(uwsgi_pcre *, const char *, int);
++int uwsgi_regexp_match_ovec(uwsgi_pcre *, const char *, int, int *, int);
++int uwsgi_regexp_ovector(const uwsgi_pcre *);
  char *uwsgi_regexp_apply_ovec(char *, int, char *, int, int *, int);
  
  int uwsgi_regexp_match_pattern(char *pattern, char *str);
-@@ -1182,8 +1181,7 @@
+@@ -1182,8 +1198,7 @@
  
  struct uwsgi_route {
  
 -	pcre *pattern;
 -	pcre_extra *pattern_extra;
-+	pcre2_code *pattern;
++	uwsgi_pcre *pattern;
  
  	char *orig_route;
  	
-@@ -1299,8 +1297,7 @@
+@@ -1292,15 +1307,14 @@
+ 
+ struct uwsgi_alarm_fd *uwsgi_add_alarm_fd(int, char *, size_t, char *, size_t);
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ struct uwsgi_alarm_ll {
+ 	struct uwsgi_alarm_instance *alarm;
+ 	struct uwsgi_alarm_ll *next;
  };
  
  struct uwsgi_alarm_log {
 -	pcre *pattern;
 -	pcre_extra *pattern_extra;
-+	pcre2_code *pattern;
++	uwsgi_pcre *pattern;
  	int negate;
  	struct uwsgi_alarm_ll *alarms;
  	struct uwsgi_alarm_log *next;
+@@ -2234,7 +2248,7 @@
+ 	struct uwsgi_string_list *requested_log_encoders;
+ 	struct uwsgi_string_list *requested_log_req_encoders;
+ 
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	int pcre_jit;
+ 	struct uwsgi_regexp_list *log_drain_rules;
+ 	struct uwsgi_regexp_list *log_filter_rules;
+@@ -2316,7 +2330,7 @@
+ 	int static_gzip_all;
+ 	struct uwsgi_string_list *static_gzip_dir;
+ 	struct uwsgi_string_list *static_gzip_ext;
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	struct uwsgi_regexp_list *static_gzip;
+ #endif
+ 
+@@ -2715,7 +2729,7 @@
+ 	int ssl_sessions_timeout;
+ 	struct uwsgi_cache *ssl_sessions_cache;
+ 	char *ssl_tmp_dir;
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ 	struct uwsgi_regexp_list *sni_regexp;
+ #endif
+ 	struct uwsgi_string_list *sni;
+@@ -3584,7 +3598,7 @@
+ void uwsgi_close_all_unshared_sockets(void);
+ 
+ struct uwsgi_string_list *uwsgi_string_new_list(struct uwsgi_string_list **, char *);
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ struct uwsgi_regexp_list *uwsgi_regexp_custom_new_list(struct uwsgi_regexp_list **, char *, char *);
+ #define uwsgi_regexp_new_list(x, y) uwsgi_regexp_custom_new_list(x, y, NULL);
+ #endif
+@@ -3838,7 +3852,7 @@
+ void uwsgi_opt_add_string_list_custom(char *, char *, void *);
+ void uwsgi_opt_add_dyn_dict(char *, char *, void *);
+ void uwsgi_opt_binary_append_data(char *, char *, void *);
+-#ifdef UWSGI_PCRE
++#if defined(UWSGI_PCRE) || defined(UWSGI_PCRE2)
+ void uwsgi_opt_pcre_jit(char *, char *, void *);
+ void uwsgi_opt_add_regexp_dyn_dict(char *, char *, void *);
+ void uwsgi_opt_add_regexp_list(char *, char *, void *);
 --- a/uwsgiconfig.py
 +++ b/uwsgiconfig.py
-@@ -1082,23 +1082,23 @@
-         # re-enable after pcre fix
-         if self.get('pcre'):
-             if self.get('pcre') == 'auto':
--                pcreconf = spcall('pcre-config --libs')
-+                pcreconf = spcall('pcre2-config --libs8')
-                 if pcreconf:
-                     self.libs.append(pcreconf)
--                    pcreconf = spcall("pcre-config --cflags")
-+                    pcreconf = spcall("pcre2-config --cflags")
-                     self.cflags.append(pcreconf)
-                     self.gcc_list.append('core/regexp')
-                     self.cflags.append("-DUWSGI_PCRE")
-                     has_pcre = True
+@@ -1079,30 +1079,29 @@
  
+         has_pcre = False
+ 
+-        # re-enable after pcre fix
+-        if self.get('pcre'):
+-            if self.get('pcre') == 'auto':
+-                pcreconf = spcall('pcre-config --libs')
+-                if pcreconf:
+-                    self.libs.append(pcreconf)
+-                    pcreconf = spcall("pcre-config --cflags")
+-                    self.cflags.append(pcreconf)
+-                    self.gcc_list.append('core/regexp')
+-                    self.cflags.append("-DUWSGI_PCRE")
+-                    has_pcre = True
+-
++        required_pcre = self.get('pcre')
++        if required_pcre:
++            pcre_libs = spcall('pcre2-config --libs8')
++            if pcre_libs:
++                pcre_cflags = spcall("pcre2-config --cflags")
++                pcre_define = "-DUWSGI_PCRE2"
              else:
 -                pcreconf = spcall('pcre-config --libs')
-+                pcreconf = spcall('pcre2-config --libs8')
-                 if pcreconf is None:
-                     print("*** libpcre headers unavailable. uWSGI build is interrupted. You have to install pcre development package or disable pcre")
-                     sys.exit(1)
-                 else:
-                     self.libs.append(pcreconf)
+-                if pcreconf is None:
+-                    print("*** libpcre headers unavailable. uWSGI build is interrupted. You have to install pcre development package or disable pcre")
+-                    sys.exit(1)
+-                else:
+-                    self.libs.append(pcreconf)
 -                    pcreconf = spcall("pcre-config --cflags")
-+                    pcreconf = spcall("pcre2-config --cflags")
-                     self.cflags.append(pcreconf)
-                     self.gcc_list.append('core/regexp')
-                     self.cflags.append("-DUWSGI_PCRE")
---- a/plugins/php/php_plugin.c
-+++ b/plugins/php/php_plugin.c
-@@ -813,7 +813,7 @@
- #ifdef UWSGI_PCRE
- 		struct uwsgi_regexp_list *bypass = uphp.app_bypass;
- 		while (bypass) {
--                        if (uwsgi_regexp_match(bypass->pattern, bypass->pattern_extra, wsgi_req->uri, wsgi_req->uri_len) >= 0) {
-+                        if (uwsgi_regexp_match(bypass->pattern, wsgi_req->uri, wsgi_req->uri_len) >= 0) {
- 				goto oldstyle;
-                         }
-                         bypass = bypass->next;
+-                    self.cflags.append(pcreconf)
+-                    self.gcc_list.append('core/regexp')
+-                    self.cflags.append("-DUWSGI_PCRE")
+-                    has_pcre = True
++                pcre_libs = spcall('pcre-config --libs')
++                pcre_cflags = spcall("pcre-config --cflags")
++                pcre_define = "-DUWSGI_PCRE"
++        else:
++            pcre_libs = None
++
++        if required_pcre:
++            if required_pcre != 'auto' and pcre_libs is None:
++                print("*** libpcre headers unavailable. uWSGI build is interrupted. You have to install pcre development package or disable pcre")
++                sys.exit(1)
++
++            self.libs.append(pcre_libs)
++            self.cflags.append(pcre_cflags)
++            self.gcc_list.append('core/regexp')
++            self.cflags.append(pcre_define)
++            has_pcre = True
+ 
+         if has_pcre:
+             report['pcre'] = True

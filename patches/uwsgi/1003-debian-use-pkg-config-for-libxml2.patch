@@ -33,7 +33,7 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
  GCC_LIST = ['webdav']
 --- a/uwsgiconfig.py
 +++ b/uwsgiconfig.py
-@@ -1311,10 +1311,10 @@
+@@ -1310,10 +1310,10 @@
  
          if self.get('xml'):
              if self.get('xml') == 'auto':
@@ -46,7 +46,7 @@ This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
                      self.cflags.append(xmlconf)
                      self.cflags.append("-DUWSGI_XML -DUWSGI_XML_LIBXML2")
                      self.gcc_list.append('core/xmlconf')
-@@ -1325,13 +1325,13 @@
+@@ -1324,13 +1324,13 @@
                      self.gcc_list.append('core/xmlconf')
                      report['xml'] = 'expat'
              elif self.get('xml') == 'libxml2':
