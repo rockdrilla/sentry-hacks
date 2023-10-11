@@ -45,7 +45,7 @@ TARBALLS = \
 	python-xmlsec \
 	google-crc32c \
 
-TARBALL_DIR = artifacts
+TARBALL_DIR = artifacts/tarballs
 TARBALL_DIRPATH = $(if $(strip $(TARBALL_DIR)),$(strip $(TARBALL_DIR))/)
 
 $(eval $(call versioned_tarball_target , sentry          , $(SENTRY_GITREF)          , $(SENTRY_URI)          ))

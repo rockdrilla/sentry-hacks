@@ -1,14 +1,5 @@
 --- a/setup.cfg
 +++ b/setup.cfg
-@@ -16,7 +16,7 @@ classifiers =
-     License :: Other/Proprietary License
-     Operating System :: POSIX :: Linux
-     Programming Language :: Python :: 3
--    Programming Language :: Python :: 3.8
-+    Programming Language :: Python :: 3.11
-     Programming Language :: Python :: 3 :: Only
-     Topic :: Software Development
- 
 @@ -109,7 +109,7 @@ extension =
      S=tools.flake8_plugin:SentryCheck
  
