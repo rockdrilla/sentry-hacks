@@ -486,11 +486,9 @@ RUN xargs -r -a apt.deps apt-install ; \
     python-compile.sh . ; \
     cleanup
 
-COPY --from=sentry-prepare  /app/sentry.tar.gz  /tmp/
-
 ## provide some data for sentry
-RUN tar -xf /tmp/sentry.tar.gz ./docker ; \
-    cleanup
+RUN tar -xf /app/sentry.tar.gz ./docker ; \
+    rm /app/sentry.tar.gz
 
 COPY --from=artifacts  "${SENTRY_WHEEL}"        /tmp/
 COPY --from=artifacts  "${SENTRY_LIGHT_WHEEL}"  /tmp/
