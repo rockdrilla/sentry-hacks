@@ -42,7 +42,6 @@ ARG SNUBA_GITREF
 COPY --from=artifacts  tarballs/snuba-${SNUBA_GITREF}.tar.gz  /tmp/snuba.tar.gz
 
 COPY /snuba/               /app/snuba/
-COPY /patches/snuba.patch  /app/
 
 ## repack snuba tarball
 RUN mkdir /tmp/snuba ; \
@@ -52,8 +51,6 @@ RUN mkdir /tmp/snuba ; \
     rm -rf docker_entrypoint.sh docs tests ; \
     ## replace with local changes
     tar -C /app/snuba -cf - . | tar -xf - ; \
-    ## apply patch
-    patch -p1 < /app/snuba.patch ; \
     ## save tarball
     tar -cf - . | gzip -9 > /app/snuba.tar.gz ; \
     ls -l /tmp/snuba.tar.gz /app/snuba.tar.gz ; \
@@ -621,8 +618,11 @@ RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     cleanup
 
+COPY /patches/snuba.patch  /tmp/
+
 ## install snuba "in-place"
-RUN pip -v install --no-deps -e . ; \
+RUN patch -p1 < /tmp/snuba.patch ; \
+    pip -v install --no-deps -e . ; \
     python-compile.sh . ; \
     ## adjust permissions
     chmod -R go-w /app ; \
