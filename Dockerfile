@@ -1,20 +1,10 @@
-ARG IMAGE_PATH=docker.io/rockdrilla
-ARG DISTRO
-ARG SUITE
-ARG PYTHON_VERSION
-ARG NODEJS_VERSION
-
-ARG STAGE_IMAGE=${IMAGE_PATH}/python-dev:${PYTHON_VERSION}-${SUITE}
-ARG BASE_IMAGE=${IMAGE_PATH}/python:${PYTHON_VERSION}-${SUITE}
-ARG NODEJS_PKG_IMAGE=${IMAGE_PATH}/nodejs-pkg:${NODEJS_VERSION}-${SUITE}
+ARG BASE_IMAGE
+ARG STAGE_IMAGE
 
 ARG BUILDER_INTERIM_IMAGE
-ARG UWSGI_INTERIM_IMAGE
-ARG LIBRDKAFKA_INTERIM_IMAGE
 ARG COMMON_DEPS_INTERIM_IMAGE
 ARG COMMON_INTERIM_IMAGE
 ARG SENTRY_DEPS_INTERIM_IMAGE
-ARG SENTRY_WHL_INTERIM_IMAGE
 ARG SNUBA_DEPS_INTERIM_IMAGE
 
 ## ---
@@ -135,7 +125,7 @@ ENV DEB_BUILD_OPTIONS='hardening=+all,-pie,-stackprotectorstrong optimize=-lto' 
     DEB_CFLAGS_PREPEND="${_CFLAGS_PREPEND}" \
     DEB_CFLAGS_PREPEND="${_CFLAGS_PREPEND}"
 
-RUN quiet apt-install apt-utils build-essential curl debhelper fakeroot gnupg jq zstd ; \
+RUN apt-install binutils jq patch ; \
     cleanup
 
 COPY /build-scripts/*.sh  /usr/local/sbin/
@@ -143,11 +133,9 @@ RUN chmod +x /usr/local/sbin/*.sh
 
 ## hack everything!
 
-ARG PYTHON_VERSION
-ENV PATH="/opt/python-${PYTHON_VERSION}/bin:${PATH}"
-
 RUN cd / ; \
-    dpkg-buildflags --export=sh > /opt/flags ; \
+    apt-wrap 'gcc dpkg-dev' \
+      dpkg-buildflags --export=sh > /opt/flags ; \
     . /opt/flags ; \
     for f in ${CFLAGS} ; do \
         case "$f" in \
@@ -156,17 +144,18 @@ RUN cd / ; \
         ;; \
         esac ; \
     done ; \
-    grep -ZFRl -e fstack-protector-strong $(python-config --prefix)/ \
-    | grep -zEv '\.(o|pyc|so)$' \
+    prefix=$(python -c 'import sys;print(sys.prefix)') ; \
+    files=$(mktemp) ; \
+    ufind -z ${prefix} | grep -zEiv '\.(o|pyc|so|whl)$' | sort -zV > "${files}" ; \
+    xvp grep -ZFl -e fstack-protector-strong "${files}" \
     | xargs -0r sed -i -e 's/fstack-protector-strong/fstack-protector/g' ; \
-    grep -ZFRl -e fno-lto $(python-config --prefix)/ \
-    | grep -zEv '\.(o|pyc|so)$' \
+    xvp grep -ZFl -e fno-lto "${files}" \
     | xargs -0r sed -Ei -e 's/\s*-fno-lto\s*/ /g' ; \
-    grep -ZFRl -e ' -O2 ' $(python-config --prefix)/ \
-    | grep -zEv '\.(o|pyc|so)$' \
+    xvp grep -ZFl -e ' -O2 ' "${files}" \
     | xargs -0r sed -i -e 's#\s*-g -O2\s*# -O2 #g;'"s# -O2 # ${_CFLAGS_PREPEND} #g" ; \
-    python-compile.sh "$(python-config --prefix)/lib/" ; \
+    cleanup ; \
     ## smoke/qa
+    set -xv ; \
     python-config --cflags
 
 ## install python build deps
@@ -179,13 +168,24 @@ RUN cd /tmp ; \
       'maturin~=1.3.0' \
       'mypy~=1.5.1' \
     ; \
+    ## provide compatibility symlinks
+    prefix=$(python -c 'import sys;print(sys.prefix)') ; \
+    for b in ${prefix}/bin/* ; do \
+        n="${b##*/}" ; \
+        if command -v "$n" ; then continue ; fi ; \
+        ln -sv "$b" "/usr/local/sbin/$n" ; \
+    done ; \
+    ## reinstall misc packages
     pip-list.sh > list1 ; \
     set +e ; \
-    grep -Fvx -f list0 list1 > list2 || : ; \
+    grep -Fvx -f list0 list1 > list2 ; \
     grep -Ev -e '^(cython|maturin|mypy)' list2 > list3 ; \
     set -e ; \
     xargs -r -a list3 pip install --force-reinstall ; \
+    strip-debug-elf.sh /usr/local "${SITE_PACKAGES}" ; \
     cd / ; cleanup
+
+WORKDIR /app
 
 ## ---
 
@@ -195,8 +195,6 @@ SHELL [ "/bin/sh", "-ec" ]
 ENV BUILD_DEPS='libjemalloc-dev libpcre2-dev'
 
 ENV UWSGI_PROFILE_OVERRIDE='malloc_implementation=jemalloc;pcre=true;ssl=false;xml=false'
-
-WORKDIR /app
 
 RUN apt-list-installed > apt.deps.0
 
@@ -236,9 +234,6 @@ FROM ${BUILDER_INTERIM_IMAGE} as librdkafka
 SHELL [ "/bin/sh", "-ec" ]
 
 ENV BUILD_DEPS='libcurl4-openssl-dev libffi-dev liblz4-dev libsasl2-dev libssl-dev libzstd-dev zlib1g-dev'
-ENV BUILD_FROM_SRC='confluent-kafka'
-
-WORKDIR /app
 
 RUN apt-list-installed > apt.deps.0
 
@@ -253,7 +248,7 @@ RUN cd /tmp ; \
     export CPPFLAGS="${CPPFLAGS} -Wno-free-nonheap-object" ; \
     export LDFLAGS="${LDFLAGS} -Wno-free-nonheap-object" ; \
     tar --strip-components=1 -xf /tmp/librdkafka.tar.gz ; \
-    apt-wrap-sodeps -p /usr/local "${BUILD_DEPS}" \
+    apt-wrap-sodeps -p /usr/local "build-essential ${BUILD_DEPS}" \
       sh -ec '\
         ./configure \
           --prefix=/usr/local \
@@ -268,7 +263,7 @@ RUN cd /tmp ; \
     rm -rf /usr/local/share/doc /usr/local/lib/librdkafka*.a ; \
     ## install confluent-kafka
     apt-wrap-python -p "/usr/local:${SITE_PACKAGES}" -d "${BUILD_DEPS}" \
-      pip install -v --no-binary "${BUILD_FROM_SRC}" \
+      pip install -v --no-binary 'confluent-kafka' \
         confluent-kafka==2.2.0 \
     ; \
     cd / ; cleanup
@@ -284,7 +279,6 @@ FROM ${BUILDER_INTERIM_IMAGE} as common-deps
 SHELL [ "/bin/sh", "-ec" ]
 
 ENV BUILD_DEPS='libffi-dev libyaml-dev rapidjson-dev'
-ENV BUILD_FROM_SRC='cffi,charset-normalizer,python-rapidjson,pyyaml,regex,simplejson'
 
 ENV CHARSET_NORMALIZER_USE_MYPYC=1
 ENV PYYAML_FORCE_CYTHON=1
@@ -302,8 +296,6 @@ COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${LIBRDKAFKA_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-WORKDIR /app
-
 RUN sort -uV apt.deps.uwsgi apt.deps.librdkafka \
     | xargs -r apt-install ; \
     ldconfig ; \
@@ -313,14 +305,16 @@ RUN sort -uV apt.deps.uwsgi apt.deps.librdkafka \
 COPY /common/  /tmp/common/
 
 RUN cd /tmp ; \
-    ## install (binary) dependencies
+    ## install (non-binary) dependencies
     apt-wrap-python -p "/usr/local:${SITE_PACKAGES}" -d "${BUILD_DEPS}" \
-      pip install -v --no-binary "${BUILD_FROM_SRC}" \
-        -r common/requirements-binary.txt \
+      pip install -v \
+        -r common/requirements.txt \
     ; \
-    ## install remaining dependencies
-    pip install -v \
-      -r common/requirements.txt \
+    ## install (binary) dependencies
+    build_from_src=$(pip-names-from-req.sh common/requirements-binary.txt | paste -sd',') ; \
+    apt-wrap-python -p "/usr/local:${SITE_PACKAGES}" -d "${BUILD_DEPS}" \
+      pip install -v --force-reinstall --no-binary "${build_from_src}" \
+        -r common/requirements-binary.txt \
     ; \
     ## adjust *.pem (if any)
     find ${SITE_PACKAGES} -name '*.pem' -type f \
@@ -341,8 +335,7 @@ RUN diff-apt-lists.sh apt.deps.common apt.deps.0 apt.deps.uwsgi apt.deps.librdka
 FROM ${COMMON_DEPS_INTERIM_IMAGE} as sentry-deps
 SHELL [ "/bin/sh", "-ec" ]
 
-ENV BUILD_DEPS='libmaxminddb-dev libpq-dev libre2-dev libxmlsec1-dev libxslt1-dev libzstd-dev rapidjson-dev'
-ENV BUILD_FROM_SRC='brotli,google-crc32c,grpcio,hiredis,lxml,maxminddb,mmh3,msgpack,protobuf,psycopg2,zstandard'
+ENV BUILD_DEPS='libmaxminddb-dev libpq-dev libre2-dev libxmlsec1-dev libxslt1-dev libzstd-dev'
 
 ENV CRC32C_PURE_PYTHON=0
 ENV GRPC_PYTHON_DISABLE_LIBC_COMPATIBILITY=1
@@ -351,8 +344,6 @@ ENV GRPC_PYTHON_BUILD_WITH_CYTHON=1
 ## Debian 12 Bookworm libre2 is newer than in grpcio (1.57.0)
 ENV GRPC_PYTHON_BUILD_SYSTEM_RE2=1
 ENV PYXMLSEC_OPTIMIZE_SIZE=0
-
-WORKDIR /app
 
 RUN apt-list-installed > apt.deps.0 ; \
     list-elf.sh /app /usr/local "${SITE_PACKAGES}" > elves.0
@@ -370,7 +361,7 @@ RUN cd /tmp ; \
     cd /tmp/google-crc32c ; \
     . /opt/flags ; \
     tar --strip-components=1 -xf /tmp/google-crc32c.tar.gz ; \
-    apt-wrap-sodeps -p /usr/local "cmake" \
+    apt-wrap-sodeps -p /usr/local "build-essential cmake" \
       sh -ec '\
         pfx=/usr/local ; \
         cmake \
@@ -386,18 +377,20 @@ RUN cd /tmp ; \
         cmake --install . --prefix ${pfx} ; \
         ldconfig' ; \
     cd /tmp ; \
-    ## install (binary) dependencies
+    ## install (non-binary) dependencies
     apt-wrap-python -p "/usr/local:${SITE_PACKAGES}" -d "${BUILD_DEPS}" \
-      pip install -v --no-binary "${BUILD_FROM_SRC}" \
+      pip install -v \
+        -r sentry/requirements-frozen.txt \
+    ; \
+    ## install (binary) dependencies
+    build_from_src=$(pip-names-from-req.sh sentry/requirements-binary.txt | paste -sd',') ; \
+    apt-wrap-python -p "/usr/local:${SITE_PACKAGES}" -d "${BUILD_DEPS}" \
+      pip install -v --force-reinstall --no-binary "${build_from_src}" \
         python-xmlsec.tar.gz \
         -r sentry/requirements-binary.txt \
     ; \
     ## smoke/qa
     python -c 'import maxminddb.extension; maxminddb.extension.Reader' ; \
-    ## install remaining dependencies
-    pip install -v \
-      -r sentry/requirements-frozen.txt \
-    ; \
     ## adjust *.pem (if any)
     find ${SITE_PACKAGES} -name '*.pem' -type f \
     | while read -r n ; do \
@@ -436,14 +429,10 @@ RUN if ! [ -s "/run/artifacts/${SENTRY_LIGHT_WHEEL}" ] ; then \
         cd / ; cleanup ; \
     fi
 
-ARG NODEJS_PKG_IMAGE
 ARG NODEJS_VERSION
-
-COPY --from=${NODEJS_PKG_IMAGE}  /deb/  /tmp/deb/
-
 RUN if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
         unset SENTRY_LIGHT_BUILD ; \
-        apt-install /tmp/deb/k2-nodejs-*_${NODEJS_VERSION}-*.deb ; \
+        apt-install k2-nodejs-${NODEJS_VERSION}-dev ; \
         mkdir -p /tmp/sentry-build ; \
         cd /tmp/sentry-build ; \
         tar -xf /app/sentry.tar.gz ; \
@@ -458,6 +447,7 @@ RUN if ! [ -s "/run/artifacts/${SENTRY_WHEEL}" ] ; then \
 FROM ${BUILDER_INTERIM_IMAGE} as sentry-aldente
 SHELL [ "/bin/sh", "-ec" ]
 
+ARG SENTRY_DEPS_INTERIM_IMAGE
 ARG SENTRY_WHL_INTERIM_IMAGE
 ARG SENTRY_RELEASE
 ARG SENTRY_BUILD
@@ -467,11 +457,9 @@ ENV SENTRY_WHEEL="sentry-${SENTRY_RELEASE}-py311-none-any.whl"
 ENV SENTRY_LIGHT_WHEEL="sentry-light-${SENTRY_RELEASE}-py311-none-any.whl"
 
 ## copy binary dependencies
-COPY --from=${SENTRY_WHL_INTERIM_IMAGE}  /app/              /app/
-COPY --from=${SENTRY_WHL_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
-COPY --from=${SENTRY_WHL_INTERIM_IMAGE}  /usr/local/        /usr/local/
-
-WORKDIR /app
+COPY --from=${SENTRY_WHL_INTERIM_IMAGE}   /app/              /app/
+COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
+COPY --from=${SENTRY_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
 COPY /patches/*.patch  /tmp/
 
@@ -480,14 +468,16 @@ RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     ## patch packages
     cd ${SITE_PACKAGES} ; \
-    for n in celery django memcached ; do \
+    for n in celery memcached ; do \
         patch -p1 < /tmp/$n.patch ; \
     done ; \
-    python-compile.sh . ; \
+    python-compile.sh \
+        -x planout/test/test_assignment \
+        ${SITE_PACKAGES} ; \
     cleanup
 
 ## provide some data for sentry
-RUN tar -xf /app/sentry.tar.gz ./docker ; \
+RUN tar -xf /app/sentry.tar.gz ./self-hosted ; \
     rm /app/sentry.tar.gz
 
 COPY --from=artifacts  "${SENTRY_WHEEL}"        /tmp/
@@ -509,25 +499,23 @@ RUN wheel_name="${SENTRY_WHEEL}" ; \
     pip -v install --no-deps "${SENTRY_WHEEL}" ; \
     cd /app ; \
     cleanup ; \
-    python-compile.sh ${SITE_PACKAGES} ; \
+    python-compile.sh \
+        -x planout/test/test_assignment \
+        ${SITE_PACKAGES} ; \
     ## smoke/qa
     set -xv ; \
     sentry --version
 
 ## finish layer
 
-RUN rm /usr/local/sbin/*.sh
+RUN rm /usr/local/sbin/*
 
 ## ---
 
 FROM ${COMMON_DEPS_INTERIM_IMAGE} as snuba-deps
 SHELL [ "/bin/sh", "-ec" ]
 
-ENV BUILD_FROM_SRC='clickhouse-driver,markupsafe'
-
 ENV CIBUILDWHEEL=1
-
-WORKDIR /app
 
 RUN apt-list-installed > apt.deps.0 ; \
     list-elf.sh /app /usr/local "${SITE_PACKAGES}" > elves.0
@@ -535,14 +523,16 @@ RUN apt-list-installed > apt.deps.0 ; \
 COPY /snuba/  /tmp/snuba/
 
 RUN cd /tmp ; \
-    ## install (binary) dependencies
+    ## install (non-binary) dependencies
     apt-wrap-python -p "/usr/local:${SITE_PACKAGES}" \
-      pip install -v --no-binary "${BUILD_FROM_SRC}" \
-        -r snuba/requirements-binary.txt \
+      pip install -v \
+        -r snuba/requirements.txt \
     ; \
-    ## install remaining dependencies
-    pip install -v \
-      -r snuba/requirements.txt \
+    ## install (binary) dependencies
+    build_from_src=$(pip-names-from-req.sh snuba/requirements-binary.txt | paste -sd',') ; \
+    apt-wrap-python -p "/usr/local:${SITE_PACKAGES}" \
+      pip install -v --force-reinstall --no-binary "${build_from_src}" \
+        -r snuba/requirements-binary.txt \
     ; \
     ## adjust *.pem (if any)
     find ${SITE_PACKAGES} -name '*.pem' -type f \
@@ -560,28 +550,74 @@ RUN diff-apt-lists.sh apt.deps apt.deps.0 apt.deps.common ; \
 
 ## ---
 
-FROM ${BUILDER_INTERIM_IMAGE} as snuba-aldente
+FROM ${SNUBA_DEPS_INTERIM_IMAGE} as snuba-wheels
 SHELL [ "/bin/sh", "-ec" ]
 
-ARG SNUBA_DEPS_INTERIM_IMAGE
+ARG SENTRY_RELEASE
+ARG SENTRY_BUILD
 
-## copy binary dependencies
-COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /app/              /app/
-COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
-COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
-
-WORKDIR /app
-
-RUN xargs -r -a apt.deps apt-install ; \
-    ldconfig ; \
-    cleanup
+ARG RUST_SNUBA_VERSION=0.1.0
+ARG RUST_SNUBA_ARCH=x86_64
+ENV RUST_SNUBA_WHEEL="rust_snuba-${RUST_SNUBA_VERSION}-cp311-cp311-linux_${RUST_SNUBA_ARCH}.whl"
 
 COPY --from=snuba-prepare  /app/snuba.tar.gz  /app/
 
 ## install snuba "in-place"
 RUN tar -xf snuba.tar.gz ; \
-    rm snuba.tar.gz ; \
-    pip -v install --no-deps -e . ; \
+    rm snuba.tar.gz
+
+ARG NODEJS_VERSION
+RUN apt-install k2-nodejs-${NODEJS_VERSION}-dev ; \
+    mkdir /tmp/snuba.build ; \
+    cd /tmp/snuba.build ; \
+    tar -C /app -cf - . | tar -xf - ; \
+    admin_ui_dir='snuba/admin' ; \
+    cd ${admin_ui_dir} ; \
+    yarn install ; \
+    yarn run build ; \
+    tar -cf - dist | tar -C /app/${admin_ui_dir} -xf - ; \
+    cd / ; cleanup
+
+ARG RUST_IMAGE
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup
+
+COPY --from=${RUST_IMAGE}  ${CARGO_HOME}/   ${CARGO_HOME}/
+COPY --from=${RUST_IMAGE}  ${RUSTUP_HOME}/  ${RUSTUP_HOME}/
+
+RUN if ! [ -s "/run/artifacts/${RUST_SNUBA_WHEEL}" ] ; then \
+        export PATH="${CARGO_HOME}/bin:${PATH}" ; \
+        mkdir /tmp/snuba.build ; \
+        cd /tmp/snuba.build ; \
+        tar -C /app -cf - . | tar -xf - ; \
+        cd rust_snuba ; \
+        mkdir -p target/wheels ; \
+        apt-wrap "build-essential cmake" \
+          maturin build --release --compatibility linux --locked --strip ; \
+        cp -t /run/artifacts target/wheels/*.whl ; \
+    fi ; \
+    rm -rf ${CARGO_HOME} ${RUSTUP_HOME} ; \
+    cd / ; cleanup
+
+## ---
+
+FROM ${BUILDER_INTERIM_IMAGE} as snuba-aldente
+SHELL [ "/bin/sh", "-ec" ]
+
+ARG SNUBA_DEPS_INTERIM_IMAGE
+ARG SNUBA_WHL_INTERIM_IMAGE
+
+## copy binary dependencies
+COPY --from=${SNUBA_WHL_INTERIM_IMAGE}   /app/              /app/
+COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
+COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
+
+RUN xargs -r -a apt.deps apt-install ; \
+    ldconfig ; \
+    cleanup
+
+## install snuba "in-place"
+RUN pip -v install --no-deps -e . ; \
     python-compile.sh . ; \
     ## adjust permissions
     chmod -R go-w /app ; \
@@ -589,9 +625,19 @@ RUN tar -xf snuba.tar.gz ; \
     set -xv ; \
     snuba --version
 
+## install rust-snuba
+ARG RUST_SNUBA_VERSION=0.1.0
+ARG RUST_SNUBA_ARCH=x86_64
+ENV RUST_SNUBA_WHEEL="rust_snuba-${RUST_SNUBA_VERSION}-cp311-cp311-linux_${RUST_SNUBA_ARCH}.whl"
+
+COPY --from=artifacts  "${RUST_SNUBA_WHEEL}"  /tmp/
+
+RUN pip -v install --no-deps "/tmp/${RUST_SNUBA_WHEEL}" ; \
+    cleanup
+
 ## finish layer
 
-RUN rm /usr/local/sbin/*.sh
+RUN rm /usr/local/sbin/*
 
 ## ---
 
@@ -605,7 +651,7 @@ COPY --from=${COMMON_DEPS_INTERIM_IMAGE}  /app/              /app/
 COPY --from=${COMMON_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${COMMON_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
-RUN rm /usr/local/sbin/*.sh
+RUN rm /usr/local/sbin/*
 
 WORKDIR /app
 
@@ -625,10 +671,8 @@ CMD [ "bash" ]
 FROM ${COMMON_INTERIM_IMAGE} as sentry
 SHELL [ "/bin/sh", "-ec" ]
 
-WORKDIR /app
-
 ## prepare user
-RUN add-simple-user sentry 30000 /app
+RUN add-simple-user sentry 999 /app
 
 ## copy sentry and dependencies
 COPY --from=sentry-aldente  /app/              /app/
@@ -648,7 +692,7 @@ ENV SENTRY_BUILD=${SENTRY_BUILD} \
     GRPC_POLL_STRATEGY=epoll1
 
 RUN mkdir -p ${SENTRY_CONF} ; \
-    cp -t ${SENTRY_CONF} /app/docker/sentry.conf.py /app/docker/config.yml
+    cp -t ${SENTRY_CONF} /app/self-hosted/sentry.conf.py /app/self-hosted/config.yml
 
 EXPOSE 9000
 
@@ -662,10 +706,8 @@ USER sentry
 FROM ${COMMON_INTERIM_IMAGE} as snuba
 SHELL [ "/bin/sh", "-ec" ]
 
-WORKDIR /app
-
 ## prepare user
-RUN add-simple-user snuba 30000 /app
+RUN add-simple-user snuba 1000 /app
 
 ## copy snuba and dependencies
 COPY --from=snuba-aldente  /app/              /app/

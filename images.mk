@@ -11,6 +11,7 @@ INTERIM_IMAGES = \
 	librdkafka \
 	common \
 	sentry-wheels \
+	snuba-wheels \
 	$(addsuffix -deps,common $(strip $(FINAL_IMAGES)))
 
 BUILDER_IMAGES = $(filter-out common,$(INTERIM_IMAGES))
@@ -22,6 +23,7 @@ images: $(addprefix image-,$(strip $(IMAGES)))
 
 ## explicit ordering
 image-snuba: \
+  image-interim-snuba-wheels \
   image-interim-common
 image-sentry: \
   image-interim-sentry-wheels \
@@ -44,6 +46,8 @@ image-interim-snuba-deps: \
   $(addprefix image-interim-,common-deps)
 image-interim-sentry-wheels: \
   image-interim-sentry-deps
+image-interim-snuba-wheels: \
+  image-interim-snuba-deps
 
 $(eval $(call final_image_target , sentry , , $(call image_name , sentry , ) ))
 $(eval $(call final_image_target , snuba  , , $(call image_name , snuba , ) ))
@@ -54,6 +58,7 @@ $(eval $(call interim_image_target , librdkafka , , sentry , librdkafka ))
 $(eval $(call interim_image_target , common-deps , , sentry , common-deps ))
 $(eval $(call interim_image_target , common , , sentry , common ))
 $(eval $(call interim_image_target , sentry-wheels , , sentry , wheels ))
+$(eval $(call interim_image_target , snuba-wheels , , snuba , wheels ))
 
 BUILDER_INTERIM_IMAGE     :=$(call fq_image_name , sentry , builder )
 UWSGI_INTERIM_IMAGE       :=$(call fq_image_name , sentry , uwsgi )
@@ -63,6 +68,7 @@ COMMON_INTERIM_IMAGE      :=$(call fq_image_name , sentry , common )
 SENTRY_DEPS_INTERIM_IMAGE :=$(call fq_image_name , sentry , deps )
 SENTRY_WHL_INTERIM_IMAGE  :=$(call fq_image_name , sentry , wheels )
 SNUBA_DEPS_INTERIM_IMAGE  :=$(call fq_image_name , snuba  , deps )
+SNUBA_WHL_INTERIM_IMAGE   :=$(call fq_image_name , snuba  , wheels )
 
 $(eval $(call BUILD_IMAGE_ARGS_append , \
 	BUILDER_INTERIM_IMAGE \
@@ -73,6 +79,7 @@ $(eval $(call BUILD_IMAGE_ARGS_append , \
 	SENTRY_DEPS_INTERIM_IMAGE \
 	SENTRY_WHL_INTERIM_IMAGE \
 	SNUBA_DEPS_INTERIM_IMAGE \
+	SNUBA_WHL_INTERIM_IMAGE \
 ))
 
 ## HERE_PATH must be defined in top-level Makefile

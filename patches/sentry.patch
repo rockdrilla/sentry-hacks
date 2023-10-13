@@ -1,6 +1,6 @@
 --- a/src/sentry/api/event_search.py
 +++ b/src/sentry/api/event_search.py
-@@ -6,7 +6,7 @@ from typing import Any, List, Mapping, NamedTuple, Sequence, Set, Tuple, Union
+@@ -9,7 +9,7 @@ from typing import Any, List, Mapping, NamedTuple, Sequence, Set, Tuple, Union
  
  from django.utils.functional import cached_property
  from parsimonious.exceptions import IncompleteParseError
@@ -9,7 +9,7 @@
  from parsimonious.grammar import Grammar, NodeVisitor
  from parsimonious.nodes import Node
  
-@@ -258,9 +258,23 @@ def flatten(children):
+@@ -259,9 +259,23 @@ def flatten(children):
      return children
  
  
@@ -34,7 +34,7 @@
  
      return list(filter(is_not_optional, children))
  
-@@ -301,7 +315,7 @@ def handle_negation(negation, operator):
+@@ -302,7 +316,7 @@ def handle_negation(negation, operator):
  
  def get_operator_value(operator):
      if isinstance(operator, Node):
@@ -74,44 +74,19 @@
 -            cmd = (sys.executable, "-c", PYUWSGI_PROG)
 -            os.execvp(cmd[0], cmd)
 +            os.execvp("uwsgi", ("uwsgi",))
---- a/src/sentry/testutils/helpers/query.py
-+++ b/src/sentry/testutils/helpers/query.py
-@@ -12,14 +12,15 @@ def parse_queries(captured_queries):
-     for query in captured_queries:
-         raw_sql = query["sql"]
-         parsed = sqlparse.parse(raw_sql)
--        for token in parsed[0].tokens:
-+        for token_index, token in enumerate(parsed[0].tokens):
-             if token.ttype is DML:
-                 if token.value.upper() in write_ops:
--                    table_name = parsed[0].get_real_name()
--                    if parsed[0].get_real_name() == "*":  # DELETE * FROM ...
--                        table_name = parsed[0].get_name()
--                    if real_queries.get(table_name) is None:
--                        real_queries[table_name] = 0
--                    real_queries[table_name] += 1
-+                    for t in parsed[0].tokens[token_index + 1 :]:
-+                        if isinstance(t, sqlparse.sql.Identifier):
-+                            table_name = t.get_real_name()
-+                            if real_queries.get(table_name) is None:
-+                                real_queries[table_name] = 0
-+                            real_queries[table_name] += 1
-+                            break
- 
-     return real_queries
 --- a/src/sentry/utils/json.py
 +++ b/src/sentry/utils/json.py
-@@ -57,11 +57,11 @@ class JSONEncoderForHTML(JSONEncoder):
-     def encode(self, o):
+@@ -77,11 +77,11 @@ class JSONEncoderForHTML(JSONEncoder):
+     def encode(self, o: object) -> str:
          # Override JSONEncoder.encode because it has hacks for
          # performance that make things more complicated.
 -        chunks = self.iterencode(o, True)
 +        chunks = self.iterencode(o)
          return "".join(chunks)
  
--    def iterencode(self, o, _one_shot=False):
+-    def iterencode(self, o: object, _one_shot: bool = False) -> Generator[str, None, None]:
 -        chunks = super().iterencode(o, _one_shot)
-+    def iterencode(self, o):
++    def iterencode(self, o: object) -> Generator[str, None, None]:
 +        chunks = super().iterencode(o)
          for chunk in chunks:
              chunk = chunk.replace("&", "\\u0026")
