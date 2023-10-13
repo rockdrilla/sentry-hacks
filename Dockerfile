@@ -506,6 +506,11 @@ RUN wheel_name="${SENTRY_WHEEL}" ; \
     set -xv ; \
     sentry --version
 
+## entrypoint
+COPY /sentry/run.sh  /app/run.sh
+RUN sentry --help 2>&1 | sed -En '1,/^\s*Commands:/d;/^  \S/p' | awk '{print $1}' >> run.sh ; \
+    chmod +x run.sh
+
 ## finish layer
 
 RUN rm /usr/local/sbin/*
@@ -635,6 +640,11 @@ COPY --from=artifacts  "${RUST_SNUBA_WHEEL}"  /tmp/
 RUN pip -v install --no-deps "/tmp/${RUST_SNUBA_WHEEL}" ; \
     cleanup
 
+## entrypoint
+COPY /snuba/run.sh  /app/run.sh
+RUN snuba --help 2>&1 | sed -En '1,/^\s*Commands:/d;/^  \S/p' | awk '{print $1}' >> run.sh ; \
+    chmod +x run.sh
+
 ## finish layer
 
 RUN rm /usr/local/sbin/*
@@ -696,6 +706,7 @@ RUN mkdir -p ${SENTRY_CONF} ; \
 
 EXPOSE 9000
 
+ENTRYPOINT [ "/app/run.sh" ]
 CMD [ "sentry", "run", "web" ]
 
 ## switch user
@@ -724,6 +735,7 @@ ENV SNUBA_RELEASE="${SENTRY_RELEASE}" \
     UWSGI_STATS_PUSH=dogstatsd:127.0.0.1:8126 \
     UWSGI_DOGSTATSD_EXTRA_TAGS=service:snuba
 
+ENTRYPOINT [ "/app/run.sh" ]
 CMD [ "snuba", "api" ]
 
 ## switch user
