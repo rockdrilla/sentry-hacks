@@ -49,7 +49,7 @@ RUN mkdir /tmp/snuba ; \
     cd /tmp/snuba ; \
     tar --strip-components=1 -xf /tmp/snuba.tar.gz ; \
     ## remove unused things
-    rm -rf docs tests ; \
+    rm -rf docker_entrypoint.sh docs tests ; \
     ## replace with local changes
     tar -C /app/snuba -cf - . | tar -xf - ; \
     ## apply patch
@@ -477,8 +477,8 @@ RUN xargs -r -a apt.deps apt-install ; \
     cleanup
 
 ## provide some data for sentry
-RUN tar -xf /app/sentry.tar.gz ./self-hosted ; \
-    rm /app/sentry.tar.gz
+RUN tar -xf sentry.tar.gz ./self-hosted ; \
+    rm sentry.tar.gz
 
 COPY --from=artifacts  "${SENTRY_WHEEL}"        /tmp/
 COPY --from=artifacts  "${SENTRY_LIGHT_WHEEL}"  /tmp/
@@ -665,8 +665,8 @@ RUN rm /usr/local/sbin/*
 
 WORKDIR /app
 
-RUN xargs -r -a /app/apt.deps.common apt-install ; \
-    rm /app/apt.deps.common ; \
+RUN xargs -r -a apt.deps.common apt-install ; \
+    rm apt.deps.common ; \
     ldconfig ; \
     cleanup
 
@@ -689,7 +689,7 @@ COPY --from=sentry-aldente  /app/              /app/
 COPY --from=sentry-aldente  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=sentry-aldente  /usr/local/        /usr/local/
 
-RUN xargs -r -a /app/apt.deps apt-install ; \
+RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     install -d -m 01777 /data ; \
     cleanup
@@ -725,7 +725,7 @@ COPY --from=snuba-aldente  /app/              /app/
 COPY --from=snuba-aldente  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=snuba-aldente  /usr/local/        /usr/local/
 
-RUN xargs -r -a /app/apt.deps apt-install ; \
+RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     cleanup
 
