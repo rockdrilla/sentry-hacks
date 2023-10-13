@@ -43,6 +43,89 @@
      elif isinstance(operator, list):
          operator = operator[0]
      return operator
+--- a/src/sentry/incidents/subscription_processor.py
++++ b/src/sentry/incidents/subscription_processor.py
+@@ -45,7 +45,7 @@ from sentry.snuba.models import QuerySubscription
+ from sentry.snuba.tasks import build_query_builder
+ from sentry.utils import metrics, redis
+ from sentry.utils.dates import to_datetime, to_timestamp
+-from sentry.utils.redis import RetryingRedisCluster
++from sentry_redis_tools.retrying_cluster import RetryingRedisCluster
+ 
+ logger = logging.getLogger(__name__)
+ REDIS_TTL = int(timedelta(days=7).total_seconds())
+--- a/src/sentry/monitoring/queues.py
++++ b/src/sentry/monitoring/queues.py
+@@ -10,9 +10,9 @@ class RedisBackend:
+ 
+     @cached_property
+     def client(self):
+-        from redis import StrictRedis
++        from redis import Redis
+ 
+-        return StrictRedis.from_url(self.broker_url)
++        return Redis.from_url(self.broker_url)
+ 
+     def bulk_get_sizes(self, queues):
+         return [(queue, self.get_size(queue)) for queue in queues]
+--- a/src/sentry/processing/backpressure/memory.py
++++ b/src/sentry/processing/backpressure/memory.py
+@@ -3,7 +3,7 @@ from typing import Any, Generator, Mapping, Union
+ 
+ import rb
+ import requests
+-from rediscluster import RedisCluster
++from redis.cluster import RedisCluster
+ 
+ 
+ @dataclass
+--- a/src/sentry/ratelimits/cardinality.py
++++ b/src/sentry/ratelimits/cardinality.py
+@@ -6,7 +6,8 @@ from sentry_redis_tools.cardinality_limiter import (
+     RedisCardinalityLimiter as RedisCardinalityLimiterImpl,
+ )
+ from sentry_redis_tools.cardinality_limiter import RequestedQuota
+-from sentry_redis_tools.clients import BlasterClient, RedisCluster
++from redis.cluster import RedisCluster
++from sentry_redis_tools.clients import BlasterClient
+ 
+ from sentry.utils import metrics, redis
+ from sentry.utils.redis_metrics import RedisToolsMetricsBackend
+--- a/src/sentry/ratelimits/sliding_windows.py
++++ b/src/sentry/ratelimits/sliding_windows.py
+@@ -1,6 +1,7 @@
+ from typing import Any, Optional, Sequence, Tuple
+ 
+-from sentry_redis_tools.clients import RedisCluster, StrictRedis
++from redis import Redis
++from redis.cluster import RedisCluster
+ from sentry_redis_tools.sliding_windows_rate_limiter import GrantedQuota, Quota
+ from sentry_redis_tools.sliding_windows_rate_limiter import (
+     RedisSlidingWindowRateLimiter as RedisSlidingWindowRateLimiterImpl,
+@@ -120,7 +121,7 @@ class RedisSlidingWindowRateLimiter(SlidingWindowRateLimiter):
+     def __init__(self, **options: Any) -> None:
+         cluster_key = options.get("cluster", "default")
+         client = redis.redis_clusters.get(cluster_key)
+-        assert isinstance(client, (StrictRedis, RedisCluster)), client
++        assert isinstance(client, (Redis, RedisCluster)), client
+         self.client = client
+         self.impl = RedisSlidingWindowRateLimiterImpl(self.client)
+         super().__init__(**options)
+--- a/src/sentry/relay/projectconfig_cache/redis.py
++++ b/src/sentry/relay/projectconfig_cache/redis.py
+@@ -55,7 +55,11 @@ class RedisProjectConfigCache(ProjectConfigCache):
+         )
+ 
+     def get(self, public_key):
+-        rv = self.cluster_read.get(self.__get_redis_key(public_key))
++        rv = None
++        try:
++            rv = self.cluster_read.get(self.__get_redis_key(public_key))
++        except UnicodeDecodeError as e:
++            rv = e.object
+         if rv is not None:
+             try:
+                 rv = zstandard.decompress(rv).decode()
 --- a/src/sentry/services/http.py
 +++ b/src/sentry/services/http.py
 @@ -6,20 +6,6 @@ from typing import Any, Generator, MutableMapping, NoReturn
@@ -74,6 +157,34 @@
 -            cmd = (sys.executable, "-c", PYUWSGI_PROG)
 -            os.execvp(cmd[0], cmd)
 +            os.execvp("uwsgi", ("uwsgi",))
+--- a/src/sentry/statistical_detectors/redis.py
++++ b/src/sentry/statistical_detectors/redis.py
+@@ -3,7 +3,8 @@ from __future__ import annotations
+ from typing import List, Mapping
+ 
+ from django.conf import settings
+-from sentry_redis_tools.clients import RedisCluster, StrictRedis
++from redis import Redis
++from redis.cluster import RedisCluster
+ 
+ from sentry.statistical_detectors.detector import DetectorPayload, DetectorStore
+ from sentry.utils import redis
+@@ -12,7 +13,7 @@ STATE_TTL = 24 * 60 * 60  # 1 day TTL
+ 
+ 
+ class RedisDetectorStore(DetectorStore):
+-    def __init__(self, client: RedisCluster | StrictRedis | None = None, ttl=STATE_TTL):
++    def __init__(self, client: RedisCluster | Redis | None = None, ttl=STATE_TTL):
+         self.ttl = ttl
+         self.client = self.get_redis_client() if client is None else client
+ 
+@@ -49,5 +50,5 @@ class RedisDetectorStore(DetectorStore):
+         return f"sdf:p:{payload.project_id}:f:{payload.group}"
+ 
+     @staticmethod
+-    def get_redis_client() -> RedisCluster | StrictRedis:
++    def get_redis_client() -> RedisCluster | Redis:
+         return redis.redis_clusters.get(settings.SENTRY_STATISTICAL_DETECTORS_REDIS_CLUSTER)
 --- a/src/sentry/utils/json.py
 +++ b/src/sentry/utils/json.py
 @@ -77,11 +77,11 @@ class JSONEncoderForHTML(JSONEncoder):
@@ -91,3 +202,100 @@
          for chunk in chunks:
              chunk = chunk.replace("&", "\\u0026")
              chunk = chunk.replace("<", "\\u003c")
+--- a/src/sentry/utils/kvstore/redis.py
++++ b/src/sentry/utils/kvstore/redis.py
+@@ -3,7 +3,8 @@ from __future__ import annotations
+ from datetime import timedelta
+ from typing import Optional, TypeVar
+ 
+-from sentry_redis_tools.clients import RedisCluster, StrictRedis
++from redis import Redis
++from redis.cluster import RedisCluster
+ 
+ from sentry.utils.kvstore.abstract import KVStorage
+ 
+@@ -16,8 +17,8 @@ class RedisKVStorage(KVStorage[str, T]):
+     or cluster.)
+     """
+ 
+-    def __init__(self, client: StrictRedis[T] | RedisCluster[T]) -> None:
+-        self.client: StrictRedis[T] | RedisCluster[T] = client
++    def __init__(self, client: Redis[T] | RedisCluster[T]) -> None:
++        self.client: Redis[T] | RedisCluster[T] = client
+ 
+     def get(self, key: str) -> Optional[T]:
+         return self.client.get(key.encode("utf8"))
+--- a/src/sentry/utils/redis.py
++++ b/src/sentry/utils/redis.py
+@@ -10,13 +10,13 @@ from typing import Generic, TypeVar
+ import rb
+ from django.utils.functional import SimpleLazyObject
+ from pkg_resources import resource_string
+-from redis.client import Script
++from redis.commands.core import Script
+ from redis.connection import ConnectionPool, Encoder
+-from redis.exceptions import BusyLoadingError, ConnectionError
+-from rediscluster import RedisCluster
+-from rediscluster.exceptions import ClusterError
++from redis.exceptions import BusyLoadingError, ConnectionError, RedisClusterException
++from redis.cluster import RedisCluster
+ from sentry_redis_tools import clients
+ from sentry_redis_tools.failover_redis import FailoverRedis
++from sentry_redis_tools.retrying_cluster import RetryingRedisCluster
+ 
+ from sentry import options
+ from sentry.exceptions import InvalidConfiguration
+@@ -79,28 +79,6 @@ class _RBCluster:
+         return "Redis Blaster Cluster"
+ 
+ 
+-class RetryingRedisCluster(RedisCluster):
+-    """
+-    Execute a command with cluster reinitialization retry logic.
+-
+-    Should a cluster respond with a ConnectionError or BusyLoadingError the
+-    cluster nodes list will be reinitialized and the command will be executed
+-    again with the most up to date view of the world.
+-    """
+-
+-    def execute_command(self, *args, **kwargs):
+-        try:
+-            return super(self.__class__, self).execute_command(*args, **kwargs)
+-        except (
+-            ConnectionError,
+-            BusyLoadingError,
+-            ClusterError,
+-            KeyError,  # see: https://github.com/Grokzen/redis-py-cluster/issues/287
+-        ):
+-            self.connection_pool.nodes.reset()
+-            return super(self.__class__, self).execute_command(*args, **kwargs)
+-
+-
+ class _RedisCluster:
+     def supports(self, config):
+         # _RedisCluster supports two configurations:
+@@ -127,14 +105,7 @@ class _RedisCluster:
+         def cluster_factory():
+             if config.get("is_redis_cluster", False):
+                 return RetryingRedisCluster(
+-                    # Intentionally copy hosts here because redis-cluster-py
+-                    # mutates the inner dicts and this closure can be run
+-                    # concurrently, as SimpleLazyObject is not threadsafe. This
+-                    # is likely triggered by RetryingRedisCluster running
+-                    # reset() after startup
+-                    #
+-                    # https://github.com/Grokzen/redis-py-cluster/blob/73f27edf7ceb4a408b3008ef7d82dac570ab9c6a/rediscluster/nodemanager.py#L385
+-                    startup_nodes=deepcopy(hosts),
++                    startup_nodes=hosts,
+                     decode_responses=True,
+                     skip_full_coverage_check=True,
+                     max_connections=16,
+@@ -191,7 +162,7 @@ class ClusterManager(Generic[T]):
+ # completed, remove the rb ``clusters`` module variable and rename
+ # redis_clusters to clusters.
+ clusters = ClusterManager(options.default_manager)
+-redis_clusters: ClusterManager[clients.RedisCluster | clients.StrictRedis] = ClusterManager(
++redis_clusters: ClusterManager[clients.RedisCluster | Redis] = ClusterManager(
+     options.default_manager, _RedisCluster
+ )
+ 
