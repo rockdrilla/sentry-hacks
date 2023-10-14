@@ -313,8 +313,8 @@ RUN cd /tmp ; \
       pip install -v --force-reinstall --no-binary "${build_from_src}" \
         -r common/requirements-binary.txt \
     ; \
-    ## adjust *.pem (if any)
-    find ${SITE_PACKAGES} -name '*.pem' -type f \
+    ## adjust certificates
+    find ${SITE_PACKAGES} -regextype egrep -regex '.+\.(pem|crt)$' -type f \
     | while read -r n ; do \
         [ -n "$n" ] || continue ; \
         rm -fv "$n" ; \
@@ -388,8 +388,8 @@ RUN cd /tmp ; \
     ; \
     ## smoke/qa
     python -c 'import maxminddb.extension; maxminddb.extension.Reader' ; \
-    ## adjust *.pem (if any)
-    find ${SITE_PACKAGES} -name '*.pem' -type f \
+    ## adjust certificates
+    find ${SITE_PACKAGES} -regextype egrep -regex '.+\.(pem|crt)$' -type f \
     | while read -r n ; do \
         [ -n "$n" ] || continue ; \
         rm -fv "$n" ; \
@@ -536,8 +536,8 @@ RUN cd /tmp ; \
       pip install -v --force-reinstall --no-binary "${build_from_src}" \
         -r snuba/requirements-binary.txt \
     ; \
-    ## adjust *.pem (if any)
-    find ${SITE_PACKAGES} -name '*.pem' -type f \
+    ## adjust certificates
+    find ${SITE_PACKAGES} -regextype egrep -regex '.+\.(pem|crt)$' -type f \
     | while read -r n ; do \
         [ -n "$n" ] || continue ; \
         rm -fv "$n" ; \
