@@ -388,13 +388,6 @@ RUN cd /tmp ; \
     ; \
     ## smoke/qa
     python -c 'import maxminddb.extension; maxminddb.extension.Reader' ; \
-    ## adjust certificates
-    find ${SITE_PACKAGES} -regextype egrep -regex '.+\.(pem|crt)$' -type f \
-    | while read -r n ; do \
-        [ -n "$n" ] || continue ; \
-        rm -fv "$n" ; \
-        ln -sfv /etc/ssl/certs/ca-certificates.crt "$n" ; \
-    done ; \
     cd / ; cleanup
 
 ## finish layer
@@ -503,6 +496,14 @@ RUN wheel_name="${SENTRY_WHEEL}" ; \
     set -xv ; \
     sentry --version
 
+## adjust certificates
+RUN find ${SITE_PACKAGES} -regextype egrep -regex '.+\.(pem|crt)$' -type f \
+    | while read -r n ; do \
+        [ -n "$n" ] || continue ; \
+        rm -fv "$n" ; \
+        ln -sfv /etc/ssl/certs/ca-certificates.crt "$n" ; \
+    done
+
 ## entrypoint
 COPY /sentry/run.sh  /app/run.sh
 RUN sentry --help 2>&1 | sed -En '1,/^\s*Commands:/d;/^  \S/p' | awk '{print $1}' >> run.sh ; \
@@ -536,13 +537,6 @@ RUN cd /tmp ; \
       pip install -v --force-reinstall --no-binary "${build_from_src}" \
         -r snuba/requirements-binary.txt \
     ; \
-    ## adjust certificates
-    find ${SITE_PACKAGES} -regextype egrep -regex '.+\.(pem|crt)$' -type f \
-    | while read -r n ; do \
-        [ -n "$n" ] || continue ; \
-        rm -fv "$n" ; \
-        ln -sfv /etc/ssl/certs/ca-certificates.crt "$n" ; \
-    done ; \
     cd / ; cleanup
 
 ## finish layer
@@ -639,6 +633,14 @@ COPY --from=artifacts  "${RUST_SNUBA_WHEEL}"  /tmp/
 
 RUN pip -v install --no-deps "/tmp/${RUST_SNUBA_WHEEL}" ; \
     cleanup
+
+## adjust certificates
+RUN find ${SITE_PACKAGES} -regextype egrep -regex '.+\.(pem|crt)$' -type f \
+    | while read -r n ; do \
+        [ -n "$n" ] || continue ; \
+        rm -fv "$n" ; \
+        ln -sfv /etc/ssl/certs/ca-certificates.crt "$n" ; \
+    done
 
 ## entrypoint
 COPY /snuba/run.sh  /app/run.sh
