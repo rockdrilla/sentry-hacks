@@ -458,7 +458,7 @@ RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     ## patch packages
     cd ${SITE_PACKAGES} ; \
-    for n in celery memcached ; do \
+    for n in celery confluent-kafka memcached ; do \
         patch -p1 < /tmp/$n.patch ; \
     done ; \
     python-compile.sh \
@@ -608,8 +608,17 @@ COPY --from=${SNUBA_WHL_INTERIM_IMAGE}   /app/              /app/
 COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  ${SITE_PACKAGES}/  ${SITE_PACKAGES}/
 COPY --from=${SNUBA_DEPS_INTERIM_IMAGE}  /usr/local/        /usr/local/
 
+COPY /patches/*.patch  /tmp/
+
+## install remaining dependencies
 RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
+    ## patch packages
+    cd ${SITE_PACKAGES} ; \
+    for n in confluent-kafka ; do \
+        patch -p1 < /tmp/$n.patch ; \
+    done ; \
+    python-compile.sh ${SITE_PACKAGES} ; \
     cleanup
 
 COPY /patches/snuba.patch  /tmp/
@@ -683,6 +692,8 @@ CMD [ "bash" ]
 FROM ${COMMON_INTERIM_IMAGE} as sentry
 SHELL [ "/bin/sh", "-ec" ]
 
+ENV SENTRY_COMPONENT=sentry
+
 ## prepare user
 RUN add-simple-user sentry 999 /app
 
@@ -718,6 +729,8 @@ USER sentry
 
 FROM ${COMMON_INTERIM_IMAGE} as snuba
 SHELL [ "/bin/sh", "-ec" ]
+
+ENV SENTRY_COMPONENT=snuba
 
 ## prepare user
 RUN add-simple-user snuba 1000 /app
