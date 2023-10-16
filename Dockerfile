@@ -26,7 +26,7 @@ RUN mkdir /tmp/sentry ; \
     ## replace with local changes
     tar -C /app/sentry -cf - . | tar -xf - ; \
     ## apply patch
-    patch -p1 < /app/sentry-build.patch ; \
+    patch -p1 < /app/sentry.patch ; \
     ## save tarball
     tar -cf - . | gzip -9 > /app/sentry.tar.gz ; \
     ls -l /tmp/sentry.tar.gz /app/sentry.tar.gz ; \
