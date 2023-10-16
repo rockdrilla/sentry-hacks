@@ -184,6 +184,8 @@ RUN cd /tmp ; \
 
 WORKDIR /app
 
+CMD [ "bash" ]
+
 ## ---
 
 FROM ${BUILDER_INTERIM_IMAGE} as uwsgi
@@ -677,6 +679,17 @@ WORKDIR /app
 RUN xargs -r -a apt.deps.common apt-install ; \
     rm apt.deps.common ; \
     ldconfig ; \
+    apt-install \
+        jq less lsof procps psmisc vim-tiny \
+    ; \
+    # install vim-tiny as variant for vim
+    vim=/usr/bin/vim ; \
+    update-alternatives --install ${vim} vim ${vim}.tiny 1 ; \
+    # quirk for vim-tiny
+    find /usr/share/vim/ -name debian.vim \
+    | sed 's/debian.vim/defaults.vim/' \
+    | xargs -d '\n' -r touch ; \
+    #
     cleanup
 
 ARG SENTRY_RELEASE
