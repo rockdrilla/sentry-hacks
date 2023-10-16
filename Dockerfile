@@ -237,6 +237,8 @@ RUN apt-list-installed > apt.deps.0
 ARG LIBRDKAFKA_GITREF
 COPY --from=artifacts  tarballs/librdkafka-${LIBRDKAFKA_GITREF}.tar.gz  /tmp/librdkafka.tar.gz
 
+COPY /build-patches/librdkafka.patch  /tmp/
+
 RUN cd /tmp ; \
     ## build librdkafka
     mkdir librdkafka ; \
@@ -245,6 +247,7 @@ RUN cd /tmp ; \
     export CPPFLAGS="${CPPFLAGS} -Wno-free-nonheap-object" ; \
     export LDFLAGS="${LDFLAGS} -Wno-free-nonheap-object" ; \
     tar --strip-components=1 -xf /tmp/librdkafka.tar.gz ; \
+    patch -p1 < /tmp/librdkafka.patch ; \
     apt-wrap-sodeps -p /usr/local "build-essential ${BUILD_DEPS}" \
       sh -ec '\
         ./configure \
@@ -458,7 +461,7 @@ RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
     ## patch packages
     cd ${SITE_PACKAGES} ; \
-    for n in celery confluent-kafka memcached ; do \
+    for n in celery memcached ; do \
         patch -p1 < /tmp/$n.patch ; \
     done ; \
     python-compile.sh \
@@ -613,11 +616,6 @@ COPY /patches/*.patch  /tmp/
 ## install remaining dependencies
 RUN xargs -r -a apt.deps apt-install ; \
     ldconfig ; \
-    ## patch packages
-    cd ${SITE_PACKAGES} ; \
-    for n in confluent-kafka ; do \
-        patch -p1 < /tmp/$n.patch ; \
-    done ; \
     python-compile.sh ${SITE_PACKAGES} ; \
     cleanup
 
