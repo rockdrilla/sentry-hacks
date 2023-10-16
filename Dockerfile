@@ -17,7 +17,7 @@ COPY --from=artifacts  tarballs/sentry-${SENTRY_GITREF}.tar.gz  /tmp/sentry.tar.
 
 COPY /sentry/  /app/sentry/
 
-COPY /patches/sentry-build.patch  /app/
+COPY /build-patches/sentry.patch  /app/
 
 ## repack sentry tarball
 RUN mkdir /tmp/sentry ; \
@@ -68,7 +68,7 @@ COPY --from=artifacts  tarballs/uwsgi-${UWSGI_GITREF}.tar.gz  /tmp/uwsgi.tar.gz
 ARG UWSGI_DOGSTATSD_GITREF
 COPY --from=artifacts  tarballs/uwsgi-dogstatsd-${UWSGI_DOGSTATSD_GITREF}.tar.gz  /app/uwsgi-dogstatsd.tar.gz
 
-COPY /patches/uwsgi/  /app/uwsgi/
+COPY /build-patches/uwsgi/  /app/uwsgi/
 
 ## repack uwsgi tarball
 RUN mkdir /tmp/uwsgi ; \
@@ -95,7 +95,7 @@ SHELL [ "/bin/sh", "-ec" ]
 ARG PYTHON_XMLSEC_GITREF
 COPY --from=artifacts  tarballs/python-xmlsec-${PYTHON_XMLSEC_GITREF}.tar.gz  /tmp/python-xmlsec.tar.gz
 
-COPY /patches/python-xmlsec.patch  /app/
+COPY /build-patches/python-xmlsec.patch  /app/
 
 ## repack python-xmlsec tarball
 RUN mkdir /tmp/python-xmlsec ; \
