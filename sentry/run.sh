@@ -22,7 +22,7 @@ fi
 case "$1" in
 run )
     case "$2" in
-    cron | worker )
+    cron | ingest-metrics-parallel-consumer | worker )
         export DUMB_INIT_SETSID=0
     ;;
     esac

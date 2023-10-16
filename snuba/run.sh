@@ -18,6 +18,13 @@ fi
 
 [ "${snuba_cmd}" = 1 ] || exec /ep.sh "$@"
 
+# quirk for "celery" + "dumb-init"
+case "$1" in
+subscriptions-executor | subscriptions-scheduler | subscriptions-scheduler-executor )
+    export DUMB_INIT_SETSID=0
+;;
+esac
+
 exec /ep.sh snuba "$@"
 
 # commands:
