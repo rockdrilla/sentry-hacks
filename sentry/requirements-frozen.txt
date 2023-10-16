@@ -40,7 +40,7 @@ openai==0.27.0
 petname==2.6
 phabricator==0.9.1
 phonenumberslite==8.12.57
-pillow==10.0.1
+pillow==10.1.0
 planout==0.6.0
 proto-plus==1.22.1
 pycountry==17.5.14
