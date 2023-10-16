@@ -1,6 +1,4 @@
-diff --git a/src/rdkafka_conf.c.orig b/src/rdkafka_conf.c
-index 9200af4c..4ae5c430 100644
---- a/src/rdkafka_conf.c.orig
+--- a/src/rdkafka_conf.c
 +++ b/src/rdkafka_conf.c
 @@ -2201,10 +2201,25 @@ static void rd_kafka_defaultconf_set(int scope, void *conf) {
  }
